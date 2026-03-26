@@ -20,6 +20,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Import API Router
+from app.api import api_router
+
 # -------------------------------
 # Database import (safe import)
 # -------------------------------
@@ -69,6 +72,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# -------------------------------
+# API Router registrieren
+# -------------------------------
+app.include_router(api_router)
 
 # -------------------------------
 # CORS Middleware hinzufügen

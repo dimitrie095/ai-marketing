@@ -1,26 +1,26 @@
 # Minimal Phase 1 Requirements
 
 # FastAPI Core
-fastapi
-uvicorn[standard]
-pydantic
+fastapi==0.135.0
+uvicorn[standard]==0.34.0
+pydantic==2.10.0
 
-# Database
-motor  # MongoDB async driver
-beanie  # MongoDB ODM for Python
-pymongo  # MongoDB driver (sync)
+# Database - MongoDB with Beanie ODM
+motor==3.7.0
+beanie==1.29.0
+pymongo==4.11.0
 
 # Security (für später)
-# passlib[bcrypt]
-# python-jose[cryptography]
-# python-multipart
+# passlib[bcrypt]==1.7.4
+# python-jose[cryptography]==3.4.8
+# python-multipart==0.0.12
 
 # Environment
-python-dotenv
+python-dotenv==1.1.0
 
 # HTTP Client (für spätere APIs)
-httpx
+httpx==0.28.0
 
 # Dev Tools
-pytest
-pytest-asyncio
+pytest==8.3.0
+pytest-asyncio==0.25.0
