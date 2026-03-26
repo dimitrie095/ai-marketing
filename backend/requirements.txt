@@ -1,0 +1,26 @@
+# Minimal Phase 1 Requirements
+
+# FastAPI Core
+fastapi
+uvicorn[standard]
+pydantic
+
+# Database
+motor  # MongoDB async driver
+beanie  # MongoDB ODM for Python
+pymongo  # MongoDB driver (sync)
+
+# Security (für später)
+# passlib[bcrypt]
+# python-jose[cryptography]
+# python-multipart
+
+# Environment
+python-dotenv
+
+# HTTP Client (für spätere APIs)
+httpx
+
+# Dev Tools
+pytest
+pytest-asyncio
