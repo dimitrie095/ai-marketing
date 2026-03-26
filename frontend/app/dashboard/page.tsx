@@ -18,10 +18,12 @@ import {
   DollarSign, 
   ShoppingCart,
   MousePointerClick,
-  Users
+  Users,
+  AlertCircle
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface DashboardData {
   total_campaigns: number;
@@ -36,6 +38,20 @@ interface DashboardData {
   };
 }
 
+// Default/Empty dashboard data to prevent undefined errors
+const defaultDashboardData: DashboardData = {
+  total_campaigns: 0,
+  total_spend: 0,
+  total_revenue: 0,
+  total_profit: 0,
+  kpis: {
+    ctr: 0,
+    cvr: 0,
+    roas: 0,
+    roi: 0
+  }
+};
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +64,7 @@ export default function DashboardPage() {
   const loadData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const today = new Date();
       const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
       
@@ -56,13 +73,18 @@ export default function DashboardPage() {
         today.toISOString().split('T')[0]
       );
       
-      if (response.status === "success") {
-        setData(response.data);
+      if (response.status === "success" || response.status === "no_data") {
+        // Use response data or default data if no_data
+        setData(response.data || defaultDashboardData);
       } else {
         setError("Failed to load dashboard data");
+        setData(defaultDashboardData);
       }
     } catch (err) {
+      console.error("Dashboard load error:", err);
       setError(err instanceof Error ? err.message : "Unknown error");
+      // Set default data on error so UI still renders
+      setData(defaultDashboardData);
     } finally {
       setLoading(false);
     }
@@ -78,18 +100,21 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-destructive">Error</h2>
-            <p className="text-muted-foreground mt-2">{error}</p>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
+  // Use default data if no data loaded yet
+  const displayData = data || defaultDashboardData;
+  
+  // Calculate safe values for display
+  const safeSpend = displayData.total_spend || 0;
+  const safeRevenue = displayData.total_revenue || 0;
+  const safeCampaigns = displayData.total_campaigns || 0;
+  const safeKPIs = displayData.kpis || defaultDashboardData.kpis;
+  const safeCTR = safeKPIs.ctr || 0;
+  const safeCVR = safeKPIs.cvr || 0;
+  const safeROAS = safeKPIs.roas || 0;
+  const safeROI = safeKPIs.roi || 0;
+  
+  // Calculate derived metrics
+  const cpc = safeSpend > 0 && safeCTR > 0 ? safeSpend / (safeSpend * safeCTR / 100) : 0;
 
   return (
     <DashboardLayout>
@@ -104,37 +129,46 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error} - Zeige Demo-Daten an
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Separator />
 
         {/* Metrics Summary */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KPICard
             title="Gesamtausgaben"
-            value={`€${data?.total_spend.toFixed(2) || "0.00"}`}
+            value={`€${safeSpend.toFixed(2)}`}
             description="Letzte 30 Tage"
-            trend={data && data.total_spend > 1000 ? "up" : "down"}
-            trendValue={data && data.total_spend > 1000 ? "+22%" : "-8%"}
+            trend={safeSpend > 1000 ? "up" : "down"}
+            trendValue={safeSpend > 1000 ? "+22%" : "-8%"}
             icon={<DollarSign className="h-4 w-4" />}
           />
           <KPICard
             title="Gesamtumsatz"
-            value={`€${data?.total_revenue.toFixed(2) || "0.00"}`}
+            value={`€${safeRevenue.toFixed(2)}`}
             description="Letzte 30 Tage"
-            trend={data && data.total_revenue > 2000 ? "up" : "neutral"}
-            trendValue={data && data.total_revenue > 2000 ? "+28%" : "0%"}
+            trend={safeRevenue > 2000 ? "up" : "neutral"}
+            trendValue={safeRevenue > 2000 ? "+28%" : "0%"}
             icon={<ShoppingCart className="h-4 w-4" />}
           />
           <KPICard
             title="ROI"
-            value={`${data?.kpis.roi.toFixed(2) || "0.00"}%`}
+            value={`${safeROI.toFixed(2)}%`}
             description="Return on Investment"
-            trend={data && data.kpis.roi > 50 ? "up" : "down"}
-            trendValue={data && data.kpis.roi > 50 ? "+15%" : "-12%"}
+            trend={safeROI > 50 ? "up" : "down"}
+            trendValue={safeROI > 50 ? "+15%" : "-12%"}
             icon={<TrendingUp className="h-4 w-4" />}
           />
           <KPICard
             title="Kampagnen"
-            value={data?.total_campaigns || 0}
+            value={safeCampaigns}
             description="Aktive Kampagnen"
             trend="neutral"
             icon={<BarChart3 className="h-4 w-4" />}
@@ -144,28 +178,28 @@ export default function DashboardPage() {
         {/* KPI Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <CTRCard 
-            value={`${data?.kpis.ctr.toFixed(2) || "0.00"}%`}
-            trend={data && data.kpis.ctr > 3 ? "up" : data && data.kpis.ctr < 2 ? "down" : "neutral"}
+            value={`${safeCTR.toFixed(2)}%`}
+            trend={safeCTR > 3 ? "up" : safeCTR < 2 ? "down" : "neutral"}
           />
           <ROASCard 
-            value={data?.kpis.roas.toFixed(2) || "0.00"}
-            trend={data && data.kpis.roas > 2.5 ? "up" : data && data.kpis.roas < 1.5 ? "down" : "neutral"}
+            value={safeROAS.toFixed(2)}
+            trend={safeROAS > 2.5 ? "up" : safeROAS < 1.5 ? "down" : "neutral"}
           />
           <CPCCard 
-            value={`€${(data?.total_spend / (data ? data.total_spend / 10 : 1) || 0).toFixed(2)}`}
+            value={`€${cpc.toFixed(2)}`}
             trend="down"
           />
           <CPRCard 
-            value={`${data?.kpis.cvr.toFixed(2) || "0.00"}%`}
-            trend={data && data.kpis.cvr > 5 ? "up" : "down"}
+            value={`${safeCVR.toFixed(2)}%`}
+            trend={safeCVR > 5 ? "up" : "down"}
           />
           <SpendCard 
-            value={`€${data?.total_spend.toFixed(2) || "0.00"}`}
+            value={`€${safeSpend.toFixed(2)}`}
             trend="neutral"
           />
           <RevenueCard 
-            value={`€${data?.total_revenue.toFixed(2) || "0.00"}`}
-            trend={data && data.total_revenue > 2000 ? "up" : "neutral"}
+            value={`€${safeRevenue.toFixed(2)}`}
+            trend={safeRevenue > 2000 ? "up" : "neutral"}
           />
         </div>
 
@@ -179,8 +213,8 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Gesamt-Impressions</p>
                 <p className="text-2xl font-bold">
-                  {data?.total_spend && data.kpis.ctr > 0 
-                    ? Math.floor((data.total_spend * 1000) / (data.kpis.ctr > 0 ? data.kpis.ctr : 1)).toLocaleString()
+                  {safeSpend > 0 && safeCTR > 0 
+                    ? Math.floor((safeSpend * 1000) / (safeCTR > 0 ? safeCTR : 1)).toLocaleString()
                     : "0"
                   }
                 </p>
@@ -188,8 +222,8 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Gesamt-Klicks</p>
                 <p className="text-2xl font-bold">
-                  {data?.total_spend && data.kpis.ctr > 0
-                    ? Math.floor((data.total_spend * 1000) / (data.kpis.ctr > 0 ? data.kpis.ctr : 1) * (data.kpis.ctr / 100)).toLocaleString()
+                  {safeSpend > 0 && safeCTR > 0
+                    ? Math.floor((safeSpend * 1000) / (safeCTR > 0 ? safeCTR : 1) * (safeCTR / 100)).toLocaleString()
                     : "0"
                   }
                 </p>
@@ -197,8 +231,8 @@ export default function DashboardPage() {
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">Gesamt-Conversions</p>
                 <p className="text-2xl font-bold">
-                  {data?.total_spend && data.kpis.cvr > 0
-                    ? Math.floor((data.total_spend * 1000) / (data.kpis.ctr > 0 ? data.kpis.ctr : 1) * (data.kpis.ctr / 100) * (data.kpis.cvr / 100)).toLocaleString()
+                  {safeSpend > 0 && safeCTR > 0 && safeCVR > 0
+                    ? Math.floor((safeSpend * 1000) / (safeCTR > 0 ? safeCTR : 1) * (safeCTR / 100) * (safeCVR / 100)).toLocaleString()
                     : "0"
                   }
                 </p>
@@ -207,45 +241,69 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Quick Actions */}
+        {/* Campaign Insights */}
         <Card>
           <CardHeader>
-            <CardTitle>Schnellzugriff</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <MousePointerClick className="h-5 w-5" />
+              Kampagnen-Insights
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-2">
-              <div className="flex items-center gap-4 p-2 rounded-lg hover:bg-muted/50 cursor-pointer">
-                <div className="rounded-full bg-primary/10 p-2">
-                  <BarChart3 className="h-4 w-4 text-primary" />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10 rounded-full">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Durchschnittlicher ROAS</p>
+                    <p className="text-sm text-muted-foreground">
+                      {safeROAS.toFixed(2)}x Rückgabe pro ausgegebenem Euro
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Kampagnen verwalten</p>
-                  <p className="text-xs text-muted-foreground">
-                    Kampagnen, AdSets und Ads bearbeiten
-                  </p>
-                </div>
+                <span className={`text-sm font-medium ${safeROAS >= 2 ? 'text-green-600' : safeROAS >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {safeROAS >= 2 ? 'Ausgezeichnet' : safeROAS >= 1 ? 'Gut' : 'Verbesserung nötig'}
+                </span>
               </div>
-              <div className="flex items-center gap-4 p-2 rounded-lg hover:bg-muted/50 cursor-pointer">
-                <div className="rounded-full bg-green-500/10 p-2">
-                  <TrendingUp className="h-4 w-4 text-green-500" />
+              
+              <Separator />
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-900/20 rounded-full">
+                    <Users className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Conversion Rate</p>
+                    <p className="text-sm text-muted-foreground">
+                      {safeCVR.toFixed(2)}% der Klicks führen zu Conversions
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">KPI Analyse</p>
-                  <p className="text-xs text-muted-foreground">
-                    Detaillierte Performance-Analyse
-                  </p>
-                </div>
+                <span className={`text-sm font-medium ${safeCVR >= 5 ? 'text-green-600' : safeCVR >= 2 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {safeCVR >= 5 ? 'Hoch' : safeCVR >= 2 ? 'Durchschnitt' : 'Niedrig'}
+                </span>
               </div>
-              <div className="flex items-center gap-4 p-2 rounded-lg hover:bg-muted/50 cursor-pointer">
-                <div className="rounded-full bg-blue-500/10 p-2">
-                  <Users className="h-4 w-4 text-blue-500" />
+              
+              <Separator />
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-100 dark:bg-green-900/20 rounded-full">
+                    <DollarSign className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Netto-Gewinn</p>
+                    <p className="text-sm text-muted-foreground">
+                      €{(safeRevenue - safeSpend).toFixed(2)} nach Abzug der Werbekosten
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Audience Insights</p>
-                  <p className="text-xs text-muted-foreground">
-                    Zielgruppen-Analyse
-                  </p>
-                </div>
+                <span className={`text-sm font-medium ${(safeRevenue - safeSpend) > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {(safeRevenue - safeSpend) > 0 ? 'Profitabel' : 'Verlust'}
+                </span>
               </div>
             </div>
           </CardContent>

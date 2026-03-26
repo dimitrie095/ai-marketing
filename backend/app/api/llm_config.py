@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
-from decouple import config
 from app.db.session import get_db
-from app.db.models_lmm import LLMProvider, LLMConfig
+from app.db.models_llm import LLMProvider, LLMConfig
 from app.llm import LLMProvider as LLMProviderEnum, llm_gateway, config_manager
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 

@@ -388,11 +388,3 @@ class DeepSeekProvider(LLMProviderBase):
                 "deepseek-chat",
                 "deepseek-coder",
             ]
-
-
-# Provider-Factory
-PROVIDER_CLASSES = {
-    LLMProvider.OPENAI: OpenAIProvider,
-    LLMProvider.KIMI: KimiProvider,
-    LLMProvider.DEEPSEEK: DeepSeekProvider,
-}

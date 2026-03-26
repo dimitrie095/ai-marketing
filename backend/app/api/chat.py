@@ -12,7 +12,7 @@ import uuid
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from app.db.session import get_db
-from app.db.models_lmm import Conversation, Message
+from app.db.models_llm import Conversation, Message
 from app.llm import llm_gateway, LLMProvider, ChatCompletionRequest, ChatMessage
 import logging
 

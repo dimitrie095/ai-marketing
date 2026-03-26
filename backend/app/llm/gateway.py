@@ -10,12 +10,22 @@ from app.llm.base import (
     ChatCompletionRequest, 
     ChatCompletionResponse,
     LLMResponseError,
-    SUPPORTED_MODELS,
-    PROVIDER_CLASSES
+    SUPPORTED_MODELS
 )
-from app.llm.providers import OpenAIProvider, KimiProvider, DeepSeekProvider
+from app.llm.providers import (
+    OpenAIProvider, 
+    KimiProvider, 
+    DeepSeekProvider
+)
 import logging
 from enum import Enum
+
+# Provider-Factory - direkt hier definiert um Import-Probleme zu vermeiden
+PROVIDER_CLASSES = {
+    LLMProvider.OPENAI: OpenAIProvider,
+    LLMProvider.KIMI: KimiProvider,
+    LLMProvider.DEEPSEEK: DeepSeekProvider,
+}
 
 logger = logging.getLogger(__name__)
 

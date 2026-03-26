@@ -8,6 +8,84 @@ from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from beanie import Document, Link, Indexed
 from pydantic import Field, BaseModel
+from enum import Enum
+
+
+class PromptType(str, Enum):
+    """Types of prompts"""
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    KPI_ANALYSIS = "kpi_analysis"
+    ROOT_CAUSE = "root_cause"
+    RECOMMENDATION = "recommendation"
+
+
+class PromptVariable(BaseModel):
+    """Variable in a prompt template"""
+    name: str
+    description: Optional[str] = None
+    type: str = "string"
+    required: bool = True
+    default_value: Optional[Any] = None
+
+
+class PromptMetrics(BaseModel):
+    """Performance metrics for a prompt template"""
+    usage_count: int = 0
+    average_response_time: float = 0.0
+    average_tokens_used: int = 0
+    average_cost: float = 0.0
+    user_satisfaction: float = 0.0
+    success_rate: float = 1.0
+    last_used: Optional[datetime] = None
+
+
+class PromptStatus(str, Enum):
+    """Status of a prompt template"""
+    DRAFT = "draft"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DEPRECATED = "deprecated"
+
+
+class PromptTemplate(Document):
+    """Prompt Template with versioning and A/B testing support"""
+    id: str
+    name: str
+    description: Optional[str] = None
+    type: str  # system, user, assistant, kpi_analysis, root_cause, recommendation
+    version: str
+    status: PromptStatus = PromptStatus.DRAFT
+    
+    # Template with {{variables}} in Jinja style
+    template: str
+    variables: List[PromptVariable] = []
+    
+    # A/B Testing
+    is_test_version: bool = False
+    test_group_size: float = 0.5
+    parent_template_id: Optional[str] = None
+    
+    # Performance
+    metrics: PromptMetrics = Field(default_factory=PromptMetrics)
+    
+    # Metadata
+    created_by: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = None
+    tags: List[str] = []
+    
+    # Settings
+    class Settings:
+        name = "prompt_templates"
+        indexes = [
+            [("id", 1)],
+            [("type", 1)],
+            [("status", 1)],
+            [("created_at", -1)],
+            [("id", 1), ("version", 1)]  # Unique compound index
+        ]
 
 
 class LLMProvider(Document):

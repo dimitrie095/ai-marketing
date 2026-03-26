@@ -6,7 +6,7 @@ Laden und Verwalten von LLM Provider-Konfigurationen
 from typing import List, Dict, Any, Optional
 import os
 from app.llm.base import LLMProvider, LLMProviderConfig, DEFAULT_API_URLS
-from app.db.models import LLMProvider as LLMProviderModel, LLMConfig, Conversation, Message
+from app.db.models_llm import LLMProvider as LLMProviderModel, LLMConfig, Conversation, Message
 import logging
 
 logger = logging.getLogger(__name__)

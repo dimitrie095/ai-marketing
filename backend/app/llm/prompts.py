@@ -10,7 +10,7 @@ from enum import Enum
 import re
 import json
 import logging
-from app.db.models_lmm import PromptTemplate as PromptTemplateDB
+from app.db.models_llm import PromptTemplate as PromptTemplateDB
 
 logger = logging.getLogger(__name__)
 

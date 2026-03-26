@@ -21,13 +21,13 @@ from .providers import (
     OpenAIProvider,
     KimiProvider,
     DeepSeekProvider,
-    PROVIDER_CLASSES,
 )
 
 from .gateway import (
     LLMGateway,
     ProviderPriority,
     llm_gateway,
+    PROVIDER_CLASSES,
 )
 
 from .config import (

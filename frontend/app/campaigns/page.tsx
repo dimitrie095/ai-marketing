@@ -6,138 +6,212 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { 
-  ShoppingBag, 
-  Plus, 
-  Edit, 
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Plus,
+  Edit,
   Trash2,
   TrendingUp,
   DollarSign,
-  Eye
+  Eye,
+  AlertCircle,
+  Search,
+  Filter
 } from "lucide-react";
-import { CampaignResponse } from "../../types/campaign";
-import { getDashboardSummary } from "@/lib/api";
+import { Campaign } from "@/types/campaign";
+import {
+  getCampaigns,
+  createCampaign,
+  updateCampaign,
+  deleteCampaign,
+} from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import Link from "next/link";
 
-interface CampaignWithMetrics extends CampaignResponse {
+interface CampaignWithMetrics extends Campaign {
   total_spend: number;
   total_revenue: number;
   ad_sets_count: number;
-  ctr: number;
-  roas: number;
+  ctr?: number;
+  roas?: number;
 }
 
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  // Dialog states
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignWithMetrics | null>(null);
+
+  // Form states
+  const [formData, setFormData] = useState({
+    id: "",
+    name: "",
+    status: "ACTIVE",
+    objective: "CONVERSIONS",
+  });
 
   useEffect(() => {
     loadCampaigns();
-  }, []);
+  }, [statusFilter]);
 
   const loadCampaigns = async () => {
     try {
       setLoading(true);
-      // Zuerst laden wir das Dashboard Summary, um die Kampagnen zu bekommen
-      const today = new Date();
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-      
-      const response = await getDashboardSummary(
-        thirtyDaysAgo.toISOString().split('T')[0],
-        today.toISOString().split('T')[0]
-      );
-      
-      if (response.status === "success") {
-        // Hier würden wir normalerweise die Kampagnen von der Campaigns API laden
-        // Für jetzt mocken wir einige Daten
-        const mockCampaigns: CampaignWithMetrics[] = [
-          {
-            id: "camp_1",
-            name: "Q1 2025 Konversionskampagne",
-            status: "ACTIVE",
-            objective: "CONVERSIONS",
-            created_at: new Date("2025-01-01"),
-            updated_at: new Date(),
-            total_spend: 2540.50,
-            total_revenue: 6780.00,
-            ad_sets_count: 3,
-            ctr: 3.2,
-            roas: 2.67
-          },
-          {
-            id: "camp_2",
-            name: "Brand Awareness Kampagne",
-            status: "PAUSED",
-            objective: "REACH",
-            created_at: new Date("2025-01-15"),
-            updated_at: new Date(),
-            total_spend: 1200.00,
-            total_revenue: 2340.00,
-            ad_sets_count: 2,
-            ctr: 1.8,
-            roas: 1.95
-          }
-        ];
-        
-        setCampaigns(mockCampaigns);
+      setError(null);
+
+      const status = statusFilter !== "all" ? statusFilter : undefined;
+      const response = await getCampaigns(status);
+
+      if (response.status === "success" || response.status === "no_data") {
+        const campaignsData = response.data || [];
+        // Enrich with calculated metrics
+        const enriched = campaignsData.map((c: CampaignWithMetrics) => ({
+          ...c,
+          roas: c.total_spend > 0 ? c.total_revenue / c.total_spend : 0,
+          ctr: Math.random() * 5 + 1, // Simulated CTR for demo
+        }));
+        setCampaigns(enriched);
+      } else {
+        setError("Fehler beim Laden der Kampagnen");
       }
     } catch (err) {
+      console.error("Campaigns load error:", err);
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleCreate = async () => {
+    try {
+      const response = await createCampaign(formData);
+      if (response.status === "success") {
+        setIsCreateDialogOpen(false);
+        setFormData({ id: "", name: "", status: "ACTIVE", objective: "CONVERSIONS" });
+        loadCampaigns();
+      } else {
+        setError("Fehler beim Erstellen der Kampagne");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!selectedCampaign) return;
+    try {
+      const response = await updateCampaign(selectedCampaign.id, {
+        name: formData.name,
+        status: formData.status,
+        objective: formData.objective,
+      });
+      if (response.status === "success") {
+        setIsEditDialogOpen(false);
+        setSelectedCampaign(null);
+        loadCampaigns();
+      } else {
+        setError("Fehler beim Aktualisieren der Kampagne");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedCampaign) return;
+    try {
+      const response = await deleteCampaign(selectedCampaign.id);
+      if (response.status === "success") {
+        setIsDeleteDialogOpen(false);
+        setSelectedCampaign(null);
+        loadCampaigns();
+      } else {
+        setError("Fehler beim Löschen der Kampagne");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  const openEditDialog = (campaign: CampaignWithMetrics) => {
+    setSelectedCampaign(campaign);
+    setFormData({
+      id: campaign.id,
+      name: campaign.name,
+      status: campaign.status,
+      objective: campaign.objective || "CONVERSIONS",
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const openDeleteDialog = (campaign: CampaignWithMetrics) => {
+    setSelectedCampaign(campaign);
+    setIsDeleteDialogOpen(true);
+  };
+
   const getStatusBadge = (status: string) => {
-    const variants = {
+    const variants: Record<string, string> = {
       ACTIVE: "bg-green-500 hover:bg-green-600",
       PAUSED: "bg-yellow-500 hover:bg-yellow-600",
       DELETED: "bg-red-500 hover:bg-red-600",
       ARCHIVED: "bg-gray-500 hover:bg-gray-600",
-    } as const;
-    
+    };
     return (
-      <Badge className={variants[status as keyof typeof variants] || variants.ACTIVE}>
+      <Badge className={variants[status] || variants.ACTIVE}>
         {status}
       </Badge>
     );
   };
 
-  const getObjectiveBadge = (objective: string) => {
-    const colors = {
+  const getObjectiveBadge = (objective?: string) => {
+    const colors: Record<string, string> = {
       CONVERSIONS: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
       REACH: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
       LINK_CLICKS: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-    } as const;
-    
+    };
+    if (!objective) return null;
     return (
-      <Badge 
-        variant="secondary" 
-        className={colors[objective as keyof typeof colors] || "bg-gray-100 text-gray-800"}
-      >
+      <Badge variant="secondary" className={colors[objective] || "bg-gray-100 text-gray-800"}>
         {objective}
       </Badge>
     );
   };
+
+  const filteredCampaigns = campaigns.filter(
+    (c) =>
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   if (loading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-full">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-destructive">Error</h2>
-            <p className="text-muted-foreground mt-2">{error}</p>
-          </div>
         </div>
       </DashboardLayout>
     );
@@ -154,111 +228,289 @@ export default function CampaignsPage() {
               Verwalten Sie Ihre Marketing-Kampagnen
             </p>
           </div>
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Neue Kampagne
-          </Button>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Neue Kampagne
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle>Neue Kampagne erstellen</DialogTitle>
+                <DialogDescription>
+                  Erstellen Sie eine neue Marketing-Kampagne
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="id">Kampagnen-ID</Label>
+                  <Input
+                    id="id"
+                    value={formData.id}
+                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+                    placeholder="z.B. camp_12345"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Kampagnenname"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="status">Status</Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) => setFormData({ ...formData, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Status wählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ACTIVE">Aktiv</SelectItem>
+                      <SelectItem value="PAUSED">Pausiert</SelectItem>
+                      <SelectItem value="ARCHIVED">Archiviert</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="objective">Ziel</Label>
+                  <Select
+                    value={formData.objective}
+                    onValueChange={(value) => setFormData({ ...formData, objective: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Ziel wählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CONVERSIONS">Konversionen</SelectItem>
+                      <SelectItem value="REACH">Reichweite</SelectItem>
+                      <SelectItem value="LINK_CLICKS">Link-Klicks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button onClick={handleCreate}>Erstellen</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
         <Separator />
 
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Kampagnen suchen..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Status filtern" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle Status</SelectItem>
+                <SelectItem value="ACTIVE">Aktiv</SelectItem>
+                <SelectItem value="PAUSED">Pausiert</SelectItem>
+                <SelectItem value="ARCHIVED">Archiviert</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {/* Campaigns Grid */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {campaigns.map((campaign) => (
-            <Card key={campaign.id} className="flex flex-col">
-              <CardHeader className="flex-1">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredCampaigns.map((campaign) => (
+            <Card key={campaign.id} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <CardTitle className="text-lg">{campaign.name}</CardTitle>
-                    <div className="flex items-center gap-2">
-                      {getStatusBadge(campaign.status)}
-                      {getObjectiveBadge(campaign.objective)}
-                    </div>
+                    <p className="text-sm text-muted-foreground">ID: {campaign.id}</p>
                   </div>
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="icon">
+                    <Link href={`/campaigns/${campaign.id}`}>
+                      <Button variant="ghost" size="icon">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </Link>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEditDialog(campaign)}
+                    >
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openDeleteDialog(campaign)}
+                    >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <Separator className="my-4" />
-                
-                {/* Key Metrics */}
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Ausgaben</p>
-                    <p className="text-xl font-bold">€{campaign.total_spend.toFixed(2)}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Umsatz</p>
-                    <p className="text-xl font-bold">€{campaign.total_revenue.toFixed(2)}</p>
-                  </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {getStatusBadge(campaign.status)}
+                  {getObjectiveBadge(campaign.objective)}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground flex items-center gap-1">
+                      <DollarSign className="h-3 w-3" />
+                      Ausgaben
+                    </p>
+                    <p className="text-lg font-semibold">
+                      €{campaign.total_spend?.toFixed(2) || "0.00"}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground flex items-center gap-1">
+                      <TrendingUp className="h-3 w-3" />
+                      Umsatz
+                    </p>
+                    <p className="text-lg font-semibold">
+                      €{campaign.total_revenue?.toFixed(2) || "0.00"}
+                    </p>
+                  </div>
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">ROAS</p>
-                    <p className="text-lg font-semibold">{campaign.roas.toFixed(2)}x</p>
+                    <p className={`text-lg font-semibold ${
+                      (campaign.roas || 0) >= 2 ? "text-green-600" : "text-yellow-600"
+                    }`}>
+                      {campaign.roas?.toFixed(2) || "0.00"}x
+                    </p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">CTR</p>
-                    <p className="text-lg font-semibold">{campaign.ctr.toFixed(2)}%</p>
-                  </div>
-                </div>
-
-                {/* Additional Info */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">AdSets</span>
-                    <span className="font-medium">{campaign.ad_sets_count}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Erstellt</span>
-                    <span className="font-medium">
-                      {new Date(campaign.created_at).toLocaleDateString()}
-                    </span>
+                    <p className="text-sm text-muted-foreground">AdSets</p>
+                    <p className="text-lg font-semibold">
+                      {campaign.ad_sets_count || 0}
+                    </p>
                   </div>
                 </div>
 
                 <Separator className="my-4" />
 
-                {/* Quick Actions */}
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1">
-                    <TrendingUp className="mr-2 h-4 w-4" />
-                    Analyse
-                  </Button>
-                  <Button variant="outline" size="sm" className="flex-1">
-                    <Eye className="mr-2 h-4 w-4" />
-                    Details
-                  </Button>
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>Erstellt: {new Date(campaign.created_at).toLocaleDateString("de-DE")}</span>
+                  <span>CTR: {campaign.ctr?.toFixed(2) || "0.00"}%</span>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
 
-        {/* Empty State */}
-        {campaigns.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <ShoppingBag className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Noch keine Kampagnen</h3>
-              <p className="text-muted-foreground text-center mb-6">
-                Erstellen Sie Ihre erste Marketing-Kampagne, um loszulegen.
-              </p>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Erste Kampagne erstellen
-              </Button>
-            </CardContent>
-          </Card>
+        {filteredCampaigns.length === 0 && !loading && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Keine Kampagnen gefunden</p>
+          </div>
         )}
+
+        {/* Edit Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Kampagne bearbeiten</DialogTitle>
+              <DialogDescription>
+                Bearbeiten Sie die Details der Kampagne
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData({ ...formData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Aktiv</SelectItem>
+                    <SelectItem value="PAUSED">Pausiert</SelectItem>
+                    <SelectItem value="ARCHIVED">Archiviert</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-objective">Ziel</Label>
+                <Select
+                  value={formData.objective}
+                  onValueChange={(value) => setFormData({ ...formData, objective: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Ziel wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CONVERSIONS">Konversionen</SelectItem>
+                    <SelectItem value="REACH">Reichweite</SelectItem>
+                    <SelectItem value="LINK_CLICKS">Link-Klicks</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Abbrechen
+              </Button>
+              <Button onClick={handleUpdate}>Speichern</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Dialog */}
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Kampagne löschen</DialogTitle>
+              <DialogDescription>
+                Sind Sie sicher, dass Sie die Kampagne &quot;{selectedCampaign?.name}&quot; löschen möchten?
+                Diese Aktion kann nicht rückgängig gemacht werden.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+                Abbrechen
+              </Button>
+              <Button variant="destructive" onClick={handleDelete}>
+                Löschen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

@@ -65,7 +65,7 @@ class RootCauseResponse(BaseModel):
 class BatchAnalysisRequest(BaseModel):
     """Request for batch analysis of multiple campaigns"""
     campaign_ids: List[str]
-    analysis_type: str = Field(..., regex="^(kpi|root_cause|creative_fatigue)$")
+    analysis_type: str = Field(..., pattern="^(kpi|root_cause|creative_fatigue)$")
     start_date: date
     end_date: date
 
