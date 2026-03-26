@@ -39,10 +39,11 @@ class LLMProviderResponse(BaseModel):
     docs_url: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        json_encoders = {
+    model_config = {
+        'json_encoders': {
             datetime: lambda v: v.isoformat()
         }
+    }
 
 
 class LLMConfigCreateRequest(BaseModel):
@@ -58,6 +59,8 @@ class LLMConfigCreateRequest(BaseModel):
     is_default: bool = Field(default=False, description="Is this the default config")
     cost_per_1k_input_tokens: float = Field(default=0.0, description="Cost per 1k input tokens")
     cost_per_1k_output_tokens: float = Field(default=0.0, description="Cost per 1k output tokens")
+    
+    model_config = {'protected_namespaces': ()}
 
 
 class LLMConfigUpdateRequest(BaseModel):
@@ -71,6 +74,8 @@ class LLMConfigUpdateRequest(BaseModel):
     is_default: Optional[bool] = None
     cost_per_1k_input_tokens: Optional[float] = None
     cost_per_1k_output_tokens: Optional[float] = None
+    
+    model_config = {'protected_namespaces': ()}
 
 
 class LLMConfigResponse(BaseModel):
@@ -89,10 +94,12 @@ class LLMConfigResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        json_encoders = {
+    model_config = {
+        'protected_namespaces': (),
+        'json_encoders': {
             datetime: lambda v: v.isoformat()
         }
+    }
 
 
 class LLMConfigListResponse(BaseModel):

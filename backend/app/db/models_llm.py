@@ -122,6 +122,9 @@ class LLMConfig(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     
+    # Model config to avoid protected namespace warning
+    model_config = {'protected_namespaces': ()}
+    
     # Settings
     class Settings:
         name = "llm_configs"

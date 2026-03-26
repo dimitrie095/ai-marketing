@@ -10,7 +10,8 @@ try:
         close_database, 
         get_db, 
         get_database_name, 
-        create_indexes
+        create_indexes,
+        is_db_available
     )
     from .base import (
         Campaign,
@@ -50,6 +51,7 @@ except Exception as e:
     def get_db(): return None
     def get_database_name(): return "none"
     async def create_indexes(): pass
+    def is_db_available(): return False
 
 __all__ = [
     # Session functions
@@ -58,6 +60,7 @@ __all__ = [
     "get_db",
     "get_database_name",
     "create_indexes",
+    "is_db_available",
     
     # Document models
     "Campaign",

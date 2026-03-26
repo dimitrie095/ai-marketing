@@ -3,7 +3,7 @@ LLM Gateway
 L4-01: Zentrales Gateway für LLM Provider Routing und Fallbacks
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 from app.llm.base import (
     LLMProvider, 
     LLMProviderConfig, 
@@ -21,10 +21,11 @@ import logging
 from enum import Enum
 
 # Provider-Factory - direkt hier definiert um Import-Probleme zu vermeiden
+# Use string keys because LLMProviderConfig uses use_enum_values = True
 PROVIDER_CLASSES = {
-    LLMProvider.OPENAI: OpenAIProvider,
-    LLMProvider.KIMI: KimiProvider,
-    LLMProvider.DEEPSEEK: DeepSeekProvider,
+    "openai": OpenAIProvider,
+    "kimi": KimiProvider,
+    "deepseek": DeepSeekProvider,
 }
 
 logger = logging.getLogger(__name__)
@@ -78,30 +79,33 @@ class LLMGateway:
         
         for config in configs:
             try:
+                provider_key = config.provider if isinstance(config.provider, str) else config.provider.value
+                
                 if not config.is_active:
-                    logger.info(f"⏭️  Provider {config.provider.value} ist inaktiv")
+                    logger.info(f"⏭️  Provider {provider_key} ist inaktiv")
                     continue
                 
-                provider_class = PROVIDER_CLASSES.get(config.provider)
+                provider_class = PROVIDER_CLASSES.get(provider_key)
                 if not provider_class:
-                    errors.append(f"Unbekannter Provider: {config.provider}")
+                    errors.append(f"Unbekannter Provider: {provider_key}")
                     continue
                 
                 provider = provider_class(config)
                 await provider.initialize()
                 
-                self.providers[config.provider] = provider
-                self.token_usage[config.provider] = {
+                self.providers[provider_key] = provider
+                self.token_usage[provider_key] = {
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cost": 0.0,
                     "requests": 0
                 }
                 initialized += 1
-                logger.info(f"✅ {config.provider.value} initialisiert")
+                logger.info(f"✅ {provider_key} initialisiert")
                 
             except Exception as e:
-                error_msg = f"{config.provider.value}: {str(e)}"
+                provider_key = config.provider if isinstance(config.provider, str) else config.provider.value
+                error_msg = f"{provider_key}: {str(e)}"
                 errors.append(error_msg)
                 logger.error(f"❌ Provider Initialisierung fehlgeschlagen: {error_msg}")
         
@@ -125,7 +129,7 @@ class LLMGateway:
     async def chat_completion(
         self,
         request: ChatCompletionRequest,
-        preferred_provider: Optional[LLMProvider] = None,
+        preferred_provider: Optional[Union[LLMProvider, str]] = None,
         enable_fallback: bool = True
     ) -> ChatCompletionResponse:
         """
@@ -142,16 +146,21 @@ class LLMGateway:
         Raises:
             LLMResponseError: Wenn alle Provider fehlschlagen
         """
+        # Konvertiere preferred_provider zu String-Key
+        preferred_key = None
+        if preferred_provider:
+            preferred_key = preferred_provider if isinstance(preferred_provider, str) else preferred_provider.value
+        
         # Prüfe, ob ein bevorzugter Provider angegeben ist
         providers_to_try = []
         
-        if preferred_provider and preferred_provider in self.providers:
-            providers_to_try = [preferred_provider]
+        if preferred_key and preferred_key in self.providers:
+            providers_to_try = [preferred_key]
             if enable_fallback:
                 # Füge weitere Provider in Prioritätsreihenfolge hinzu
                 providers_to_try.extend([
                     p for p in self.priority_order 
-                    if p != preferred_provider and p in self.providers
+                    if p != preferred_key and p in self.providers
                 ])
         else:
             # Nutze Prioritätsreihenfolge
@@ -160,20 +169,20 @@ class LLMGateway:
         # Versuche jeden Provider
         errors = []
         
-        for provider in providers_to_try:
+        for provider_key in providers_to_try:
             try:
-                logger.info(f"🔄 Versuche Provider: {provider.value}")
-                response = await self.providers[provider].chat_completion(request)
+                logger.info(f"🔄 Versuche Provider: {provider_key}")
+                response = await self.providers[provider_key].chat_completion(request)
                 
                 # Tracke Token Usage
                 if response.usage:
-                    self._track_usage(provider, response.usage)
+                    self._track_usage(provider_key, response.usage)
                 
-                logger.info(f"✅ Erfolg mit Provider: {provider.value}")
+                logger.info(f"✅ Erfolg mit Provider: {provider_key}")
                 return response
                 
             except LLMResponseError as e:
-                error_msg = f"{provider.value}: {e.message}"
+                error_msg = f"{provider_key}: {e.message}"
                 errors.append(error_msg)
                 logger.warning(f"⚠️  Provider fehlgeschlagen: {error_msg}")
                 
@@ -215,9 +224,10 @@ class LLMGateway:
         
         raise LLMResponseError("RETRY_EXHAUSTED", "Maximale Anzahl an Retries erreicht")
     
-    def _track_usage(self, provider: LLMProvider, usage: Dict[str, int]) -> None:
+    def _track_usage(self, provider: Union[LLMProvider, str], usage: Dict[str, int]) -> None:
         """Tracke Token-Usage und Kosten"""
-        provider_stats = self.token_usage[provider]
+        provider_key = provider if isinstance(provider, str) else provider.value
+        provider_stats = self.token_usage[provider_key]
         
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
@@ -227,13 +237,13 @@ class LLMGateway:
         provider_stats["requests"] += 1
         
         # Berechne Kosten wenn möglich
-        provider_instance = self.providers[provider]
+        provider_instance = self.providers[provider_key]
         cost = provider_instance.calculate_cost(input_tokens, output_tokens)
         
         if cost is not None:
             provider_stats["cost"] += cost
         
-        logger.debug(f"📊 Token Usage {provider.value}: +{input_tokens} in, +{output_tokens} out")
+        logger.debug(f"📊 Token Usage {provider_key}: +{input_tokens} in, +{output_tokens} out")
     
     def get_usage_stats(self) -> Dict[str, Any]:
         """Gibt Token-Usage Statistiken zurück"""

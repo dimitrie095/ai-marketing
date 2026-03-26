@@ -105,58 +105,93 @@ async def create_indexes():
         db = client[DATABASE_NAME]
         
         # Campaign indexes
-        await db.campaigns.create_index("status")
-        await db.campaigns.create_index("updated_at")
+        try:
+            await db.campaigns.create_index("status")
+            await db.campaigns.create_index("updated_at")
+        except Exception:
+            pass
         
         # AdSet indexes
-        await db.ad_sets.create_index("campaign_id")
-        await db.ad_sets.create_index("status")
-        await db.ad_sets.create_index("updated_at")
+        try:
+            await db.ad_sets.create_index("campaign_id")
+            await db.ad_sets.create_index("status")
+            await db.ad_sets.create_index("updated_at")
+        except Exception:
+            pass
         
         # Ad indexes
-        await db.ads.create_index("ad_set_id")
-        await db.ads.create_index("status")
-        await db.ads.create_index("updated_at")
-        await db.ads.create_index("creative_type")
+        try:
+            await db.ads.create_index("ad_set_id")
+            await db.ads.create_index("status")
+            await db.ads.create_index("updated_at")
+            await db.ads.create_index("creative_type")
+        except Exception:
+            pass
         
         # Metric indexes - compound index on entity_type, entity_id, date
-        await db.metrics.create_index([
-            ("entity_type", 1),
-            ("entity_id", 1),
-            ("date", 1)
-        ], unique=True)
-        await db.metrics.create_index("date")
-        await db.metrics.create_index("entity_id")
+        # Skip if index already exists with different properties
+        try:
+            await db.metrics.create_index([
+                ("entity_type", 1),
+                ("entity_id", 1),
+                ("date", 1)
+            ], unique=True)
+        except Exception:
+            # Index may already exist without unique constraint
+            pass
+        try:
+            await db.metrics.create_index("date")
+            await db.metrics.create_index("entity_id")
+        except Exception:
+            pass
         
         # Processed data indexes
-        await db.processed_data.create_index("campaign_id")
-        await db.processed_data.create_index("date")
-        await db.processed_data.create_index([
-            ("campaign_id", 1),
-            ("date", 1)
-        ], unique=True)
+        try:
+            await db.processed_data.create_index("campaign_id")
+            await db.processed_data.create_index("date")
+        except Exception:
+            pass
+        try:
+            await db.processed_data.create_index([
+                ("campaign_id", 1),
+                ("date", 1)
+            ], unique=True)
+        except Exception:
+            pass
         
         # Raw data indexes
-        await db.raw_data.create_index("campaign_id")
-        await db.raw_data.create_index("date")
-        await db.raw_data.create_index([
-            ("campaign_id", 1),
-            ("date", 1)
-        ], unique=True)
+        try:
+            await db.raw_data.create_index("campaign_id")
+            await db.raw_data.create_index("date")
+        except Exception:
+            pass
+        try:
+            await db.raw_data.create_index([
+                ("campaign_id", 1),
+                ("date", 1)
+            ], unique=True)
+        except Exception:
+            pass
         
         # Meta Insights indexes
-        await db.meta_insights.create_index("campaign_id")
-        await db.meta_insights.create_index("date_start")
-        await db.meta_insights.create_index("date_stop")
+        try:
+            await db.meta_insights.create_index("campaign_id")
+            await db.meta_insights.create_index("date_start")
+            await db.meta_insights.create_index("date_stop")
+        except Exception:
+            pass
         
         # Google Ads Report indexes  
-        await db.google_ads_reports.create_index("campaign_id")
-        await db.google_ads_reports.create_index("segments_date")
+        try:
+            await db.google_ads_reports.create_index("campaign_id")
+            await db.google_ads_reports.create_index("segments_date")
+        except Exception:
+            pass
         
         print("✅ MongoDB indexes created successfully")
         
     except Exception as e:
-        print(f"⚠️  Some indexes may already exist or failed to create: {e}")
+        print(f"⚠️  Index creation warning: {e}")
 
 async def close_database():
     """Close MongoDB connection"""

@@ -11,7 +11,7 @@ beanie==1.26.0
 pymongo==4.9.0
 
 # LLM Providers
-openai==1.59.0
+openai
 
 # Security (für später)
 # passlib[bcrypt]==1.7.4

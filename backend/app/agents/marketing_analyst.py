@@ -64,19 +64,36 @@ class KPIAnalysisAgent:
     
     async def initialize(self):
         """Initializes the agent with prompt templates"""
-        # Try to load existing template or create default
-        from app.llm.prompts import prompt_framework
+        try:
+            # Try to load existing template or create default
+            from app.llm.prompts import prompt_framework
+            from app.db.session import is_db_available
+            
+            if is_db_available():
+                self.prompt_template = await prompt_framework.get_template(
+                    template_id="kpi_analysis_default"
+                )
+                
+                if not self.prompt_template:
+                    # Create default template
+                    self.prompt_template = prompt_framework.get_default_template(
+                        PromptType.KPI_ANALYSIS
+                    )
+                    await prompt_framework.create_template(self.prompt_template)
+            else:
+                # Use default template without DB
+                self.prompt_template = prompt_framework.get_default_template(
+                    PromptType.KPI_ANALYSIS
+                )
+                logger.info("KPIAnalysisAgent using default template (no DB)")
         
-        self.prompt_template = await prompt_framework.get_template(
-            template_id="kpi_analysis_default"
-        )
-        
-        if not self.prompt_template:
-            # Create default template
+        except Exception as e:
+            logger.warning(f"⚠️ KPIAnalysisAgent initialization warning: {e}")
+            # Use in-memory default template
+            from app.llm.prompts import prompt_framework
             self.prompt_template = prompt_framework.get_default_template(
                 PromptType.KPI_ANALYSIS
             )
-            await prompt_framework.create_template(self.prompt_template)
         
         logger.info(f"✅ KPIAnalysisAgent initialized")
     
@@ -307,17 +324,34 @@ class RootCauseAnalysisAgent:
     
     async def initialize(self):
         """Initializes the agent with prompt templates"""
-        from app.llm.prompts import prompt_framework
+        try:
+            from app.llm.prompts import prompt_framework
+            from app.db.session import is_db_available
+            
+            if is_db_available():
+                self.prompt_template = await prompt_framework.get_template(
+                    template_id="root_cause_default"
+                )
+                
+                if not self.prompt_template:
+                    self.prompt_template = prompt_framework.get_default_template(
+                        PromptType.ROOT_CAUSE
+                    )
+                    await prompt_framework.create_template(self.prompt_template)
+            else:
+                # Use default template without DB
+                self.prompt_template = prompt_framework.get_default_template(
+                    PromptType.ROOT_CAUSE
+                )
+                logger.info("RootCauseAnalysisAgent using default template (no DB)")
         
-        self.prompt_template = await prompt_framework.get_template(
-            template_id="root_cause_default"
-        )
-        
-        if not self.prompt_template:
+        except Exception as e:
+            logger.warning(f"⚠️ RootCauseAnalysisAgent initialization warning: {e}")
+            # Use in-memory default template
+            from app.llm.prompts import prompt_framework
             self.prompt_template = prompt_framework.get_default_template(
                 PromptType.ROOT_CAUSE
             )
-            await prompt_framework.create_template(self.prompt_template)
         
         logger.info(f"✅ RootCauseAnalysisAgent initialized")
     
@@ -632,6 +666,14 @@ root_cause_agent = RootCauseAnalysisAgent()
 
 async def initialize_agents():
     """Initialize all agents"""
-    await kpi_analysis_agent.initialize()
-    await root_cause_agent.initialize()
+    try:
+        await kpi_analysis_agent.initialize()
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize kpi_analysis_agent: {e}")
+    
+    try:
+        await root_cause_agent.initialize()
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize root_cause_agent: {e}")
+    
     logger.info("✅ All marketing analysis agents initialized")

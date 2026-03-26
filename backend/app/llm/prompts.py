@@ -245,8 +245,14 @@ class PromptEngineeringFramework:
         if errors:
             raise ValueError(f"Template Validierung fehlgeschlagen: {errors}")
         
-        # Speichere in DB
-        db_template = await PromptTemplateDB.insert_one(template.dict())
+        # Speichere in DB - create Document instance from dict
+        template_dict = template.dict()
+        # Convert enum values to strings for DB storage
+        template_dict['type'] = template.type.value if hasattr(template.type, 'value') else str(template.type)
+        template_dict['status'] = template.status.value if hasattr(template.status, 'value') else str(template.status)
+        
+        db_template = PromptTemplateDB(**template_dict)
+        await db_template.insert()
         logger.info(f"✅ Prompt Template erstellt: {template.id} v{template.version}")
         
         return template
@@ -258,10 +264,12 @@ class PromptEngineeringFramework:
         if version:
             query["version"] = version
         
-        template_data = await PromptTemplateDB.find_one(query, sort=[("version", -1)])
+        template_doc = await PromptTemplateDB.find_one(query, sort=[("version", -1)])
         
-        if template_data:
-            return PromptTemplate(**template_data)
+        if template_doc:
+            # Convert Beanie Document to dict for Pydantic model
+            template_dict = template_doc.model_dump() if hasattr(template_doc, 'model_dump') else template_doc.dict()
+            return PromptTemplate(**template_dict)
         return None
     
     @staticmethod
@@ -307,8 +315,13 @@ class PromptEngineeringFramework:
         if status:
             query["status"] = status.value
         
-        templates = await PromptTemplateDB.find(query).to_list()
-        return [PromptTemplate(**t) for t in templates]
+        template_docs = await PromptTemplateDB.find(query).to_list()
+        result = []
+        for doc in template_docs:
+            # Convert Beanie Document to dict for Pydantic model
+            template_dict = doc.model_dump() if hasattr(doc, 'model_dump') else doc.dict()
+            result.append(PromptTemplate(**template_dict))
+        return result
     
     @staticmethod
     async def create_ab_test(
