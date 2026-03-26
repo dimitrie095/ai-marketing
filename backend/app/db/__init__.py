@@ -17,6 +17,15 @@ from .base import (
     GoogleAdsReport
 )
 
+# LLM Models
+from .models_lmm import (
+    LLMProvider,
+    LLMConfig,
+    Conversation,
+    Message,
+    SyncJob
+)
+
 __all__ = [
     # Session functions
     "init_database",
@@ -33,5 +42,12 @@ __all__ = [
     "ProcessedData",
     "RawData",
     "MetaInsights",
-    "GoogleAdsReport"
+    "GoogleAdsReport",
+    
+    # LLM models
+    "LLMProvider",
+    "LLMConfig",
+    "Conversation",
+    "Message",
+    "SyncJob"
 ]

@@ -8,6 +8,7 @@ from typing import AsyncGenerator
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport
+from .models_lmm import LLMProvider, LLMConfig, Conversation, Message, SyncJob
 
 # Database URL from environment
 MONGODB_URL = os.getenv(
@@ -49,7 +50,12 @@ async def init_database():
                 ProcessedData,
                 RawData,
                 MetaInsights,
-                GoogleAdsReport
+                GoogleAdsReport,
+                LLMProvider,
+                LLMConfig,
+                Conversation,
+                Message,
+                SyncJob
             ]
         )
         print("✅ Beanie ODM initialized successfully")

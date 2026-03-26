@@ -27,6 +27,8 @@ from app.api import api_router
 # Database import (safe import)
 # -------------------------------
 db_available = False
+llm_available = False
+agents_available = False
 
 try:
     from app.db import init_database, close_database
@@ -38,6 +40,30 @@ except Exception as e:
     db_available = False
 
 # -------------------------------
+# LLM Gateway import (safe import)
+# -------------------------------
+try:
+    from app.llm import llm_gateway, config_manager
+    llm_available = True
+    logger.info("✅ LLM Gateway module imported successfully")
+except Exception as e:
+    logger.warning(f"⚠️  LLM Gateway not available: {e}")
+    logger.warning("   Starting without LLM support...")
+    llm_available = False
+
+# -------------------------------
+# AI Agents import (safe import)
+# -------------------------------
+try:
+    from app.agents import initialize_agents
+    agents_available = True
+    logger.info("✅ AI Agents module imported successfully")
+except Exception as e:
+    logger.warning(f"⚠️  AI Agents not available: {e}")
+    logger.warning("   Starting without AI Agents...")
+    agents_available = False
+
+# -------------------------------
 # Lifespan-Event handler
 # -------------------------------
 @asynccontextmanager
@@ -45,6 +71,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     logger.info("🚀 Starting up Marketing Analytics AI...")
 
+    agents_initialized = False
+    
     if db_available:
         # Initialize MongoDB connection
         try:
@@ -56,11 +84,42 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️ Database module not available. Skipping DB connection test.")
 
+    # Initialize LLM Gateway
+    if llm_available:
+        try:
+            configs = config_manager.load_configs_from_env()
+            if configs:
+                result = await llm_gateway.initialize(configs)
+                logger.info(f"✅ LLM Gateway initialized: {result}")
+            else:
+                logger.warning("⚠️ No LLM providers configured in environment")
+        except Exception as e:
+            logger.error(f"❌ LLM Gateway initialization failed: {e}")
+            logger.warning("Continuing without LLM support...")
+    else:
+        logger.warning("⚠️ LLM module not available. Skipping LLM init.")
+
+    # Initialize AI Agents
+    if db_available and llm_available:
+        try:
+            from app.agents import initialize_agents
+            await initialize_agents()
+            agents_initialized = True
+            logger.info("✅ AI Agents initialized")
+        except Exception as e:
+            logger.error(f"❌ AI Agents initialization failed: {e}")
+    else:
+        logger.warning("⚠️ Skipping agents initialization (DB or LLM not available)")
+
     yield
 
     # Cleanup
     if db_available:
         await close_database()
+    if llm_available:
+        # LLM Gateway benötigt keine explizite Cleanup
+        pass
+    
     logger.info("⛔ Shutting down Marketing Analytics AI...")
 
 # -------------------------------
@@ -95,11 +154,32 @@ app.add_middleware(
 @app.get("/health", tags=["Health"])
 async def health_check():
     """Health check endpoint"""
+    llm_status = "unavailable"
+    agents_status = "unavailable"
+    chat_status = "unavailable"
+    
+    if llm_available:
+        providers = llm_gateway.list_available_providers()
+        llm_status = "healthy" if len(providers) > 0 else "degraded"
+        
+        # Chat is available if LLM is available
+        chat_status = "healthy" if len(providers) > 0 else "degraded"
+        
+        # Agents are available if LLM and DB are available
+        if db_available and agents_available:
+            agents_status = "healthy"
+        else:
+            agents_status = "unavailable"
+    
     return {
         "status": "healthy",
         "service": "marketing-analytics-api",
         "version": "1.0.0",
-        "database": db_available
+        "database": db_available,
+        "llm": llm_status,
+        "llm_providers": len(llm_gateway.list_available_providers()) if llm_available else 0,
+        "agents": agents_status,
+        "chat": chat_status
     }
 
 # -------------------------------
