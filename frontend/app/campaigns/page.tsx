@@ -108,7 +108,12 @@ export default function CampaignsPage() {
 
   const handleCreate = async () => {
     try {
-      const response = await createCampaign(formData);
+      // Generate ID if not provided
+      const campaignData = {
+        ...formData,
+        id: formData.id || `camp_${Date.now().toString(36)}`,
+      };
+      const response = await createCampaign(campaignData);
       if (response.status === "success") {
         setIsCreateDialogOpen(false);
         setFormData({ id: "", name: "", status: "ACTIVE", objective: "CONVERSIONS" });
@@ -244,22 +249,25 @@ export default function CampaignsPage() {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="id">Kampagnen-ID</Label>
-                  <Input
-                    id="id"
-                    value={formData.id}
-                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-                    placeholder="z.B. camp_12345"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="name">Name</Label>
+                  <Label htmlFor="name">Name *</Label>
                   <Input
                     id="name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Kampagnenname"
                   />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="id">Kampagnen-ID (optional)</Label>
+                  <Input
+                    id="id"
+                    value={formData.id}
+                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+                    placeholder="Wird automatisch generiert wenn leer"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Wenn leer, wird eine ID automatisch generiert
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="status">Status</Label>
@@ -298,7 +306,9 @@ export default function CampaignsPage() {
                 <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                   Abbrechen
                 </Button>
-                <Button onClick={handleCreate}>Erstellen</Button>
+                <Button onClick={handleCreate} disabled={!formData.name.trim()}>
+                  Erstellen
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

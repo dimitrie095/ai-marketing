@@ -193,6 +193,46 @@ async def get_campaign_analysis(
         )
 
 
+@router.get("/root-cause/{campaign_id}", response_model=RootCauseResponse)
+async def get_root_cause(
+    campaign_id: str,
+    metric_name: str = Query(..., description="Metric to analyze"),
+    start_date_drop: date = Query(..., description="Start date of the drop period"),
+    end_date_drop: date = Query(..., description="End date of the drop period"),
+    comparison_period_days: int = Query(7, description="Days to compare"),
+    db=Depends(get_db)
+):
+    """
+    Get root cause analysis for a campaign (GET endpoint)
+    """
+    try:
+        result = await root_cause_agent.analyze_performance_drop(
+            campaign_id=campaign_id,
+            metric_name=metric_name,
+            start_date_drop=start_date_drop,
+            end_date_drop=end_date_drop,
+            comparison_period_days=comparison_period_days
+        )
+        
+        from app.llm import llm_gateway
+        usage = llm_gateway.get_usage_stats()
+        
+        return RootCauseResponse(
+            success=True,
+            data=result,
+            analysis_id=f"rca_{datetime.utcnow().timestamp()}",
+            provider_used=usage["by_provider"],
+            tokens_used=usage["total"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Root cause analysis error: {e}")
+        return RootCauseResponse(
+            success=False,
+            error=f"Analysis failed: {str(e)}"
+        )
+
+
 @router.post("/root-cause/analyze", response_model=RootCauseResponse)
 async def analyze_root_cause(
     request: RootCauseRequest,

@@ -1,0 +1,55 @@
+{
+  "campaigns": [
+    {
+      "id": "camp_1",
+      "name": "Q1 2025 Konversionskampagne",
+      "status": "ACTIVE",
+      "objective": "CONVERSIONS",
+      "created_at": "2025-01-01T00:00:00",
+      "updated_at": "2025-01-15T00:00:00",
+      "synced_at": null,
+      "ad_sets_count": 3,
+      "total_spend": 2540.50,
+      "total_revenue": 6780.00
+    },
+    {
+      "id": "camp_2",
+      "name": "Brand Awareness Kampagne",
+      "status": "PAUSED",
+      "objective": "REACH",
+      "created_at": "2025-01-15T00:00:00",
+      "updated_at": "2025-01-20T00:00:00",
+      "synced_at": null,
+      "ad_sets_count": 2,
+      "total_spend": 1200.00,
+      "total_revenue": 2340.00
+    },
+    {
+      "id": "camp_3",
+      "name": "Sommer Sale 2025",
+      "status": "ACTIVE",
+      "objective": "CONVERSIONS",
+      "created_at": "2025-02-01T00:00:00",
+      "updated_at": "2025-02-10T00:00:00",
+      "synced_at": null,
+      "ad_sets_count": 4,
+      "total_spend": 3890.75,
+      "total_revenue": 9450.00
+    }
+  ],
+  "adsets": {
+    "camp_1": [
+      {"id": "as_1_1", "campaign_id": "camp_1", "name": "AdSet 1 - DE", "status": "ACTIVE", "daily_budget": 50.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-01T00:00:00", "updated_at": "2025-01-10T00:00:00", "ads_count": 2},
+      {"id": "as_1_2", "campaign_id": "camp_1", "name": "AdSet 2 - AT", "status": "ACTIVE", "daily_budget": 30.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-01T00:00:00", "updated_at": "2025-01-10T00:00:00", "ads_count": 1},
+      {"id": "as_1_3", "campaign_id": "camp_1", "name": "AdSet 3 - CH", "status": "PAUSED", "daily_budget": 20.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-05T00:00:00", "updated_at": "2025-01-15T00:00:00", "ads_count": 1}
+    ],
+    "camp_2": [
+      {"id": "as_2_1", "campaign_id": "camp_2", "name": "AdSet 1 - Reach DE", "status": "ACTIVE", "daily_budget": 40.0, "optimization_goal": "REACH", "billing_event": "IMPRESSIONS", "created_at": "2025-01-15T00:00:00", "updated_at": "2025-01-20T00:00:00", "ads_count": 1},
+      {"id": "as_2_2", "campaign_id": "camp_2", "name": "AdSet 2 - Reach AT", "status": "PAUSED", "daily_budget": 25.0, "optimization_goal": "REACH", "billing_event": "IMPRESSIONS", "created_at": "2025-01-15T00:00:00", "updated_at": "2025-01-18T00:00:00", "ads_count": 1}
+    ],
+    "camp_3": [
+      {"id": "as_3_1", "campaign_id": "camp_3", "name": "AdSet 1 - Early Birds", "status": "ACTIVE", "daily_budget": 60.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-02-01T00:00:00", "updated_at": "2025-02-10T00:00:00", "ads_count": 2},
+      {"id": "as_3_2", "campaign_id": "camp_3", "name": "AdSet 2 - Main Sale", "status": "ACTIVE", "daily_budget": 80.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-02-01T00:00:00", "updated_at": "2025-02-10T00:00:00", "ads_count": 2}
+    ]
+  }
+}

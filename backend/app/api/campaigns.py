@@ -8,83 +8,47 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel
+import logging
 
 # Try to import database dependencies
 try:
     from app.db.session import get_db
     from app.db.models import Campaign, AdSet, Ad, Metric
     DB_AVAILABLE = True
-except ImportError:
+    print("[Campaigns API] Database module imported successfully")
+except ImportError as e:
     DB_AVAILABLE = False
     get_db = lambda: None
+    print(f"[Campaigns API] Database not available, using demo mode: {e}")
+
+# Import demo storage service
+try:
+    from app.services.demo_storage import (
+        load_demo_campaigns,
+        save_demo_campaigns,
+        find_campaign,
+        add_campaign,
+        update_campaign,
+        delete_campaign,
+        get_default_campaigns
+    )
+    STORAGE_AVAILABLE = True
+    print("[Campaigns API] Demo storage service loaded")
+except ImportError as e:
+    STORAGE_AVAILABLE = False
+    print(f"[Campaigns API] Could not load storage service: {e}")
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+logger = logging.getLogger(__name__)
 
-# Demo data for when database is not available
-_demo_campaigns = [
-    {
-        "id": "camp_1",
-        "name": "Q1 2025 Konversionskampagne",
-        "status": "ACTIVE",
-        "objective": "CONVERSIONS",
-        "created_at": "2025-01-01T00:00:00Z",
-        "updated_at": "2025-01-15T00:00:00Z",
-        "synced_at": None,
-        "ad_sets_count": 3,
-        "total_spend": 2540.50,
-        "total_revenue": 6780.00
-    },
-    {
-        "id": "camp_2",
-        "name": "Brand Awareness Kampagne",
-        "status": "PAUSED",
-        "objective": "REACH",
-        "created_at": "2025-01-15T00:00:00Z",
-        "updated_at": "2025-01-20T00:00:00Z",
-        "synced_at": None,
-        "ad_sets_count": 2,
-        "total_spend": 1200.00,
-        "total_revenue": 2340.00
-    },
-    {
-        "id": "camp_3",
-        "name": "Sommer Sale 2025",
-        "status": "ACTIVE",
-        "objective": "CONVERSIONS",
-        "created_at": "2025-02-01T00:00:00Z",
-        "updated_at": "2025-02-10T00:00:00Z",
-        "synced_at": None,
-        "ad_sets_count": 4,
-        "total_spend": 3890.75,
-        "total_revenue": 9450.00
-    }
-]
-
-_demo_adsets = {
-    "camp_1": [
-        {"id": "as_1_1", "campaign_id": "camp_1", "name": "AdSet 1 - DE", "status": "ACTIVE", "daily_budget": 50.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-10T00:00:00Z", "ads_count": 2},
-        {"id": "as_1_2", "campaign_id": "camp_1", "name": "AdSet 2 - AT", "status": "ACTIVE", "daily_budget": 30.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-10T00:00:00Z", "ads_count": 1},
-        {"id": "as_1_3", "campaign_id": "camp_1", "name": "AdSet 3 - CH", "status": "PAUSED", "daily_budget": 20.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-01-05T00:00:00Z", "updated_at": "2025-01-15T00:00:00Z", "ads_count": 1},
-    ],
-    "camp_2": [
-        {"id": "as_2_1", "campaign_id": "camp_2", "name": "AdSet 1 - Reach DE", "status": "ACTIVE", "daily_budget": 40.0, "optimization_goal": "REACH", "billing_event": "IMPRESSIONS", "created_at": "2025-01-15T00:00:00Z", "updated_at": "2025-01-20T00:00:00Z", "ads_count": 1},
-        {"id": "as_2_2", "campaign_id": "camp_2", "name": "AdSet 2 - Reach AT", "status": "PAUSED", "daily_budget": 25.0, "optimization_goal": "REACH", "billing_event": "IMPRESSIONS", "created_at": "2025-01-15T00:00:00Z", "updated_at": "2025-01-18T00:00:00Z", "ads_count": 1},
-    ],
-    "camp_3": [
-        {"id": "as_3_1", "campaign_id": "camp_3", "name": "AdSet 1 - Early Birds", "status": "ACTIVE", "daily_budget": 60.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-02-01T00:00:00Z", "updated_at": "2025-02-10T00:00:00Z", "ads_count": 2},
-        {"id": "as_3_2", "campaign_id": "camp_3", "name": "AdSet 2 - Main Sale", "status": "ACTIVE", "daily_budget": 80.0, "optimization_goal": "CONVERSIONS", "billing_event": "IMPRESSIONS", "created_at": "2025-02-01T00:00:00Z", "updated_at": "2025-02-10T00:00:00Z", "ads_count": 2},
-    ]
-}
-
-_demo_ads = {
-    "as_1_1": [
-        {"id": "ad_1_1_1", "ad_set_id": "as_1_1", "name": "Ad 1 - Carousel", "status": "ACTIVE", "creative_type": "CAROUSEL", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-05T00:00:00Z"},
-        {"id": "ad_1_1_2", "ad_set_id": "as_1_1", "name": "Ad 2 - Single Image", "status": "ACTIVE", "creative_type": "IMAGE", "created_at": "2025-01-02T00:00:00Z", "updated_at": "2025-01-06T00:00:00Z"},
-    ],
-    "as_1_2": [
-        {"id": "ad_1_2_1", "ad_set_id": "as_1_2", "name": "Ad 1 - Video", "status": "ACTIVE", "creative_type": "VIDEO", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-08T00:00:00Z"},
-    ],
-}
+# Initialize demo data
+if not DB_AVAILABLE and STORAGE_AVAILABLE:
+    logger.info("[Campaigns API] Initializing demo data storage...")
+    _demo_campaigns, _demo_adsets = load_demo_campaigns()
+    logger.info(f"[Campaigns API] Loaded {len(_demo_campaigns)} campaigns from storage")
+else:
+    _demo_campaigns = []
+    _demo_adsets = {}
 
 
 # ============================================
@@ -272,12 +236,15 @@ async def get_campaign(
     """
     # Return demo data if database not available
     if not DB_AVAILABLE:
-        campaign = next((c for c in _demo_campaigns if c["id"] == campaign_id), None)
+        print(f"[Campaigns API] Looking for campaign: {campaign_id}")
+        campaign = find_campaign(_demo_campaigns, campaign_id)
         if not campaign:
+            print(f"[Campaigns API] Campaign {campaign_id} not found! Available: {[c['id'] for c in _demo_campaigns]}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
             )
+        print(f"[Campaigns API] Found campaign: {campaign['name']}")
         return {
             "status": "success",
             "message": "Demo-Daten (Datenbank nicht verfügbar)",
@@ -285,6 +252,7 @@ async def get_campaign(
         }
     
     try:
+        print(f"[Campaigns API] DB lookup for campaign: {campaign_id}")
         campaign = await Campaign.find_one({"id": campaign_id})
         if not campaign:
             raise HTTPException(
@@ -349,19 +317,31 @@ async def create_campaign(
     }
     ```
     """
-    # Demo mode - just return success
-    if not DB_AVAILABLE:
+    # Demo mode - add to demo data
+    if not DB_AVAILABLE and STORAGE_AVAILABLE:
+        print(f"[Campaigns API] Creating campaign: {request.id}")
+        new_campaign = {
+            "id": request.id,
+            "name": request.name,
+            "status": request.status,
+            "objective": request.objective,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "synced_at": None,
+            "ad_sets_count": 0,
+            "total_spend": 0.0,
+            "total_revenue": 0.0
+        }
+        # Use storage service to add campaign
+        _demo_campaigns[:], _demo_adsets = add_campaign(_demo_campaigns, _demo_adsets, new_campaign)
+        if save_demo_campaigns(_demo_campaigns, _demo_adsets):
+            logger.info("Campaign saved to storage")
+        else:
+            logger.warning("Failed to save campaign to storage")
         return {
             "status": "success",
             "message": "Demo: Kampagne erstellt (Datenbank nicht verfügbar)",
-            "data": {
-                "id": request.id,
-                "name": request.name,
-                "status": request.status,
-                "objective": request.objective,
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
+            "data": new_campaign
         }
     
     try:
@@ -419,6 +399,37 @@ async def update_campaign(
     }
     ```
     """
+    # Demo mode
+    if not DB_AVAILABLE:
+        campaign = next((c for c in _demo_campaigns if c["id"] == campaign_id), None)
+        if not campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
+            )
+        
+        # Update fields
+        if request.name:
+            campaign["name"] = request.name
+        if request.status:
+            campaign["status"] = request.status
+        if request.objective:
+            campaign["objective"] = request.objective
+        
+        campaign["updated_at"] = datetime.utcnow().isoformat()
+        
+        # Save to file
+        if save_demo_campaigns(_demo_campaigns, _demo_adsets):
+            logger.info("Campaign updated saved to storage")
+        else:
+            logger.warning("Failed to save campaign update to storage")
+        
+        return {
+            "status": "success",
+            "message": "Kampagne erfolgreich aktualisiert (Demo)",
+            "data": campaign
+        }
+    
     try:
         campaign = await Campaign.find_one({"id": campaign_id})
         if not campaign:
@@ -469,6 +480,33 @@ async def delete_campaign(
     DELETE /api/v1/campaigns/23853712345678901
     ```
     """
+    # Demo mode
+    if not DB_AVAILABLE:
+        campaign = next((c for c in _demo_campaigns if c["id"] == campaign_id), None)
+        if not campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
+            )
+        
+        # Remove from demo campaigns
+        _demo_campaigns[:] = [c for c in _demo_campaigns if c["id"] != campaign_id]
+        
+        # Remove associated adsets
+        if campaign_id in _demo_adsets:
+            del _demo_adsets[campaign_id]
+        
+        # Save to file
+        if save_demo_campaigns(_demo_campaigns, _demo_adsets):
+            logger.info("Campaign deletion saved to storage")
+        else:
+            logger.warning("Failed to save campaign deletion to storage")
+        
+        return {
+            "status": "success",
+            "message": "Kampagne und alle zugehörigen AdSets/Ads erfolgreich gelöscht (Demo)"
+        }
+    
     try:
         campaign = await Campaign.find_one({"id": campaign_id})
         if not campaign:

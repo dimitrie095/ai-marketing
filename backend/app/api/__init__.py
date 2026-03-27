@@ -12,6 +12,10 @@ api_router = APIRouter(prefix="/api/v1")
 from .kpi import router as kpi_router
 api_router.include_router(kpi_router, tags=["kpi"])
 
+# Analytics Router
+from .analytics import router as analytics_router
+api_router.include_router(analytics_router, tags=["analytics"])
+
 # Try to import other routers (may fail if DB not available)
 try:
     from .meta import router as meta_router
@@ -46,6 +50,12 @@ except ImportError:
 try:
     from .chat import router as chat_router
     api_router.include_router(chat_router, tags=["Chat"])
+except ImportError:
+    pass
+
+try:
+    from .audience import router as audience_router
+    api_router.include_router(audience_router, tags=["Audience"])
 except ImportError:
     pass
 
