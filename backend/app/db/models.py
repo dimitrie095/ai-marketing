@@ -7,11 +7,22 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from beanie import Document, Link, Indexed
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, field_validator
+from bson import Decimal128
 
+
+# ── Shared helper ──────────────────────────────────────────────────────────────
+
+def decimal128_to_decimal(v: Any) -> Optional[Decimal]:
+    """Convert MongoDB Decimal128 → Python Decimal, pass through everything else."""
+    if isinstance(v, Decimal128):
+        return Decimal(str(v))
+    return v
+
+
+# ── Embedded documents ─────────────────────────────────────────────────────────
 
 class CreativeSpec(BaseModel):
-    """Embedded document for ad creative specifications"""
     image_url: Optional[str] = None
     headline: Optional[str] = None
     description: Optional[str] = None
@@ -20,33 +31,32 @@ class CreativeSpec(BaseModel):
     additional_fields: Optional[Dict[str, Any]] = None
 
 
+# ── Documents ──────────────────────────────────────────────────────────────────
+
 class Campaign(Document):
-    """Marketing campaign document"""
-    id: str  # Meta Ads Campaign ID - using as custom _id
+    id: str
     name: str
-    status: str  # ACTIVE, PAUSED, DELETED, ARCHIVED
+    status: str
     objective: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     synced_at: Optional[datetime] = None
-    version: int = Field(default=1)  # Optimistic locking version
-    
-    # Settings
+    version: int = Field(default=1)
+
     class Settings:
         name = "campaigns"
         indexes = [
             [("status", 1)],
             [("updated_at", -1)],
-            [("created_at", -1)]
+            [("created_at", -1)],
         ]
 
 
 class AdSet(Document):
-    """Ad set document - belongs to campaign"""
-    id: str  # Meta Ads Ad Set ID - using as custom _id
-    campaign_id: str  # Reference to campaign
+    id: str
+    campaign_id: str
     name: str
-    status: str  # ACTIVE, PAUSED, DELETED, ARCHIVED
+    status: str
     daily_budget: Optional[Decimal] = None
     lifetime_budget: Optional[Decimal] = None
     optimization_goal: Optional[str] = None
@@ -54,33 +64,35 @@ class AdSet(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     synced_at: Optional[datetime] = None
-    
-    # Settings
+
+    @field_validator("daily_budget", "lifetime_budget", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Optional[Decimal]:
+        return decimal128_to_decimal(v)
+
     class Settings:
         name = "ad_sets"
         indexes = [
             [("campaign_id", 1)],
             [("status", 1)],
             [("updated_at", -1)],
-            [("campaign_id", 1), ("status", 1)]
+            [("campaign_id", 1), ("status", 1)],
         ]
 
 
 class Ad(Document):
-    """Ad document - belongs to ad set"""
-    id: str  # Meta Ads Ad ID - using as custom _id
-    ad_set_id: str  # Reference to ad set
+    id: str
+    ad_set_id: str
     name: str
-    status: str  # ACTIVE, PAUSED, DELETED, ARCHIVED, IN_PROCESS
-    creative_type: Optional[str] = None  # IMAGE, VIDEO, CAROUSEL, etc.
+    status: str
+    creative_type: Optional[str] = None
     image_hash: Optional[str] = None
     image_url: Optional[str] = None
     creative_spec: Optional[CreativeSpec] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     synced_at: Optional[datetime] = None
-    
-    # Settings
+
     class Settings:
         name = "ads"
         indexes = [
@@ -88,14 +100,13 @@ class Ad(Document):
             [("status", 1)],
             [("updated_at", -1)],
             [("creative_type", 1)],
-            [("ad_set_id", 1), ("status", 1)]
+            [("ad_set_id", 1), ("status", 1)],
         ]
 
 
 class Metric(Document):
-    """Performance metrics document"""
     date: date
-    entity_type: str  # campaign, adset, ad
+    entity_type: str
     entity_id: str
     spend: Decimal = Field(default=Decimal("0"))
     impressions: int = Field(default=0)
@@ -111,21 +122,24 @@ class Metric(Document):
     video_p95_watched_actions: int = Field(default=0)
     video_p100_watched_actions: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Settings
+
+    @field_validator("spend", "revenue", "frequency", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Any:
+        return decimal128_to_decimal(v)
+
     class Settings:
         name = "metrics"
         indexes = [
-            [("entity_type", 1), ("entity_id", 1), ("date", 1)],  # Unique compound index
+            [("entity_type", 1), ("entity_id", 1), ("date", 1)],
             [("date", -1)],
             [("entity_id", 1)],
             [("entity_type", 1)],
-            [("entity_id", 1), ("date", -1)]
+            [("entity_id", 1), ("date", -1)],
         ]
 
 
 class ProcessedData(Document):
-    """Processed/aggregated data document"""
     campaign_id: str
     date: date
     rpm: Optional[Decimal] = None
@@ -136,43 +150,43 @@ class ProcessedData(Document):
     score: Optional[Decimal] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
-    
-    # Settings
+
+    @field_validator("rpm", "cpc", "ctr", "roi", "conversions_rate", "score", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Optional[Decimal]:
+        return decimal128_to_decimal(v)
+
     class Settings:
         name = "processed_data"
         indexes = [
-            [("campaign_id", 1), ("date", 1)],  # Unique compound index
+            [("campaign_id", 1), ("date", 1)],
             [("campaign_id", 1)],
             [("date", -1)],
-            [("campaign_id", 1), ("date", -1), ("score", -1)]
+            [("campaign_id", 1), ("date", -1), ("score", -1)],
         ]
 
 
 class RawData(Document):
-    """Raw data storage document"""
     campaign_id: str
     date: date
-    content: Dict[str, Any]  # Flexible storage for raw data
+    content: Dict[str, Any]
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Settings
+
     class Settings:
         name = "raw_data"
         indexes = [
-            [("campaign_id", 1), ("date", 1)],  # Unique compound index
+            [("campaign_id", 1), ("date", 1)],
             [("campaign_id", 1)],
-            [("date", -1)]
+            [("date", -1)],
         ]
 
 
 class ActionValues(BaseModel):
-    """Action values subdocument for Meta Insights"""
     value: Optional[str] = None
     action_type: Optional[str] = None
 
 
 class MetaInsights(Document):
-    """Meta Ads insights document"""
     campaign_id: Optional[str] = None
     ad_set_id: Optional[str] = None
     ad_id: Optional[str] = None
@@ -190,8 +204,12 @@ class MetaInsights(Document):
     actions: Optional[List[ActionValues]] = None
     action_values: Optional[List[ActionValues]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Settings
+
+    @field_validator("spend", "ctr", "cpc", "cpm", "frequency", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Optional[Decimal]:
+        return decimal128_to_decimal(v)
+
     class Settings:
         name = "meta_insights"
         indexes = [
@@ -199,12 +217,11 @@ class MetaInsights(Document):
             [("ad_set_id", 1), ("date_start", 1)],
             [("ad_id", 1), ("date_start", 1)],
             [("date_start", -1)],
-            [("date_stop", -1)]
+            [("date_stop", -1)],
         ]
 
 
 class GoogleAdsReport(Document):
-    """Google Ads API report document"""
     campaign_id: Optional[str] = None
     campaign_name: Optional[str] = None
     ad_group_id: Optional[str] = None
@@ -219,8 +236,7 @@ class GoogleAdsReport(Document):
     segments_date: Optional[date] = None
     segments_device: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Settings
+
     class Settings:
         name = "google_ads_reports"
         indexes = [
@@ -228,12 +244,11 @@ class GoogleAdsReport(Document):
             [("ad_group_id", 1), ("segments_date", 1)],
             [("ad_id", 1), ("segments_date", 1)],
             [("segments_date", -1)],
-            [("campaign_name", 1)]
+            [("campaign_name", 1)],
         ]
 
 
 class User(Document):
-    """User document for authentication"""
     username: Indexed(str, unique=True)  # type: ignore
     email: Indexed(str, unique=True)  # type: ignore
     hashed_password: str
@@ -242,12 +257,11 @@ class User(Document):
     is_superuser: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Settings
+
     class Settings:
         name = "users"
         indexes = [
             [("username", 1)],
             [("email", 1)],
-            [("is_active", 1)]
+            [("is_active", 1)],
         ]
