@@ -8,6 +8,16 @@ from fastapi import APIRouter
 # Haupt-Router erstellen
 api_router = APIRouter(prefix="/api/v1")
 
+# Authentication Router (always available)
+try:
+    from .auth import router as auth_router
+    api_router.include_router(auth_router, tags=["Authentication"])
+    print("✅ Auth router registered successfully")
+except Exception as e:
+    print(f"❌ Auth router not available: {e}")
+    import traceback
+    traceback.print_exc()
+
 # KPI Router (always available with fallback)
 from .kpi import router as kpi_router
 api_router.include_router(kpi_router, tags=["kpi"])

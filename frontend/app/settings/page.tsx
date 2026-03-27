@@ -55,6 +55,7 @@ import {
   ExternalLink,
   Power,
   Star,
+  Megaphone,
 } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -67,6 +68,12 @@ import {
   setDefaultLLMConfig,
   testLLMConfig,
   getLLMGatewayStatus,
+  getMetaAdsStatus,
+  syncMetaAdsCampaigns,
+  syncMetaAdsAdSets,
+  syncMetaAdsAds,
+  syncMetaAdsInsights,
+  syncMetaAdsAll,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -105,6 +112,10 @@ export default function SettingsPage() {
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [configs, setConfigs] = useState<LLMConfig[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<any>(null);
+  const [metaAdsStatus, setMetaAdsStatus] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -138,20 +149,61 @@ export default function SettingsPage() {
       setLoading(true);
       setError(null);
       
-      const [providersRes, configsRes, statusRes] = await Promise.all([
+      const [providersRes, configsRes, statusRes, metaAdsStatusRes] = await Promise.all([
         getLLMProviders(),
         getLLMConfigs(),
         getLLMGatewayStatus().catch(() => null),
+        getMetaAdsStatus().catch(() => null),
       ]);
       
       if (providersRes) setProviders(providersRes);
       if (configsRes?.configs) setConfigs(configsRes.configs);
       if (statusRes) setGatewayStatus(statusRes);
+      if (metaAdsStatusRes) setMetaAdsStatus(metaAdsStatusRes);
     } catch (err) {
       console.error("Failed to load settings:", err);
       setError("Fehler beim Laden der Einstellungen");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSync = async (type: string) => {
+    try {
+      setIsSyncing(true);
+      setSyncError(null);
+      setSyncSuccess(null);
+      let response;
+      switch (type) {
+        case 'campaigns':
+          response = await syncMetaAdsCampaigns();
+          break;
+        case 'adsets':
+          response = await syncMetaAdsAdSets();
+          break;
+        case 'ads':
+          response = await syncMetaAdsAds();
+          break;
+        case 'insights':
+          // For simplicity, we don't pass parameters; backend may use defaults
+          response = await syncMetaAdsInsights('campaign', [], new Date().toISOString().split('T')[0], new Date().toISOString().split('T')[0]);
+          break;
+        case 'all':
+          response = await syncMetaAdsAll();
+          break;
+        default:
+          throw new Error('Unbekannter Sync-Typ');
+      }
+      if (response.status === 'started' || response.status === 'success') {
+        setSyncSuccess(`Sync (${type}) erfolgreich gestartet.`);
+      } else {
+        setSyncError(`Sync fehlgeschlagen: ${response.message || 'Unbekannter Fehler'}`);
+      }
+    } catch (err) {
+      console.error('Sync error:', err);
+      setSyncError(err instanceof Error ? err.message : 'Unbekannter Fehler');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -343,6 +395,10 @@ export default function SettingsPage() {
             <TabsTrigger value="llm" className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
               LLM Konfiguration
+            </TabsTrigger>
+            <TabsTrigger value="ads" className="flex items-center gap-2">
+              <Megaphone className="h-4 w-4" />
+              Ads Provider
             </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Server className="h-4 w-4" />
@@ -757,6 +813,93 @@ export default function SettingsPage() {
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Ads Provider Tab */}
+          <TabsContent value="ads" className="space-y-6">
+            {/* Meta Ads Status Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Megaphone className="h-5 w-5" />
+                  Meta Ads Status
+                </CardTitle>
+                <CardDescription>
+                  Status der Meta Ads API Integration
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="bg-muted p-4 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Status</p>
+                    <Badge variant={metaAdsStatus?.status === 'configured' ? 'default' : 'destructive'}>
+                      {metaAdsStatus?.status === 'configured' ? 'Konfiguriert' : 'Nicht konfiguriert'}
+                    </Badge>
+                  </div>
+                  <div className="bg-muted p-4 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Modus</p>
+                    <p className="text-2xl font-bold">{metaAdsStatus?.mode === 'real' ? 'Live' : 'Mock'}</p>
+                  </div>
+                  <div className="bg-muted p-4 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Account ID</p>
+                    <p className="text-lg font-mono">{metaAdsStatus?.account_id || 'Nicht gesetzt'}</p>
+                  </div>
+                  <div className="bg-muted p-4 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Access Token</p>
+                    <p className="text-lg font-mono">{metaAdsStatus?.has_access_token ? 'Vorhanden' : 'Fehlt'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Sync Actions */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <RefreshCw className="h-5 w-5" />
+                  Meta Ads Sync
+                </CardTitle>
+                <CardDescription>
+                  Manuellen Sync von Meta Ads Daten starten
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <Button onClick={() => handleSync('campaigns')} disabled={isSyncing}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Kampagnen syncen
+                  </Button>
+                  <Button onClick={() => handleSync('adsets')} disabled={isSyncing}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    AdSets syncen
+                  </Button>
+                  <Button onClick={() => handleSync('ads')} disabled={isSyncing}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Ads syncen
+                  </Button>
+                  <Button onClick={() => handleSync('insights')} disabled={isSyncing}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Insights syncen
+                  </Button>
+                  <Button onClick={() => handleSync('all')} disabled={isSyncing} variant="default">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Vollständiger Sync
+                  </Button>
+                </div>
+                {syncError && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{syncError}</AlertDescription>
+                  </Alert>
+                )}
+                {syncSuccess && (
+                  <Alert className="mt-4 bg-green-50 border-green-200">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-800">{syncSuccess}</AlertDescription>
+                  </Alert>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

@@ -29,6 +29,7 @@ class Campaign(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     synced_at: Optional[datetime] = None
+    version: int = Field(default=1)  # Optimistic locking version
     
     # Settings
     class Settings:
@@ -228,4 +229,25 @@ class GoogleAdsReport(Document):
             [("ad_id", 1), ("segments_date", 1)],
             [("segments_date", -1)],
             [("campaign_name", 1)]
+        ]
+
+
+class User(Document):
+    """User document for authentication"""
+    username: Indexed(str, unique=True)  # type: ignore
+    email: Indexed(str, unique=True)  # type: ignore
+    hashed_password: str
+    full_name: Optional[str] = None
+    is_active: bool = Field(default=True)
+    is_superuser: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Settings
+    class Settings:
+        name = "users"
+        indexes = [
+            [("username", 1)],
+            [("email", 1)],
+            [("is_active", 1)]
         ]

@@ -65,6 +65,7 @@ import {
   updateCampaign,
   deleteCampaign,
   getAIInsights,
+  createAdSet,
 } from "@/lib/api";
 import {
   LineChart,
@@ -137,6 +138,7 @@ export default function CampaignDetailPage() {
   // Dialog states
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isCreateAdSetDialogOpen, setIsCreateAdSetDialogOpen] = useState(false);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   
   // Form states
@@ -144,6 +146,16 @@ export default function CampaignDetailPage() {
     name: "",
     status: "ACTIVE",
     objective: "CONVERSIONS",
+  });
+
+  // AdSet form state
+  const [adSetFormData, setAdSetFormData] = useState({
+    name: "",
+    status: "ACTIVE",
+    daily_budget: undefined as number | undefined,
+    lifetime_budget: undefined as number | undefined,
+    optimization_goal: "CONVERSIONS",
+    billing_event: "IMPRESSIONS",
   });
 
   useEffect(() => {
@@ -239,6 +251,45 @@ export default function CampaignDetailPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Löschen");
+    }
+  };
+
+  const handleCreateAdSet = async () => {
+    try {
+      // Validate required fields
+      if (!adSetFormData.name.trim()) {
+        setError("Name ist erforderlich");
+        return;
+      }
+      const response = await createAdSet(campaignId, {
+        name: adSetFormData.name,
+        status: adSetFormData.status,
+        daily_budget: adSetFormData.daily_budget,
+        lifetime_budget: adSetFormData.lifetime_budget,
+        optimization_goal: adSetFormData.optimization_goal,
+        billing_event: adSetFormData.billing_event,
+      });
+      if (response.status === "success") {
+        setIsCreateAdSetDialogOpen(false);
+        // Reset form
+        setAdSetFormData({
+          name: "",
+          status: "ACTIVE",
+          daily_budget: undefined,
+          lifetime_budget: undefined,
+          optimization_goal: "CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+        });
+        // Refresh adSets list
+        const adSetsRes = await getCampaignAdSets(campaignId);
+        if (adSetsRes.status === "success") {
+          setAdSets(adSetsRes.data || []);
+        }
+      } else {
+        setError("Fehler beim Erstellen des AdSets");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Erstellen des AdSets");
     }
   };
 
@@ -603,7 +654,7 @@ export default function CampaignDetailPage() {
           <TabsContent value="adsets" className="space-y-6">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">AdSets ({adSets.length})</h3>
-              <Button disabled>
+              <Button onClick={() => setIsCreateAdSetDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 AdSet erstellen
               </Button>
@@ -779,6 +830,111 @@ export default function CampaignDetailPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Create AdSet Dialog */}
+        <Dialog open={isCreateAdSetDialogOpen} onOpenChange={setIsCreateAdSetDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>AdSet erstellen</DialogTitle>
+              <DialogDescription>
+                Erstellen Sie ein neues AdSet für diese Kampagne
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+
+              <div className="grid gap-2">
+                <Label htmlFor="adset-name">Name</Label>
+                <Input
+                  id="adset-name"
+                  placeholder="AdSet DE"
+                  value={adSetFormData.name}
+                  onChange={(e) => setAdSetFormData({ ...adSetFormData, name: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="adset-status">Status</Label>
+                <Select
+                  value={adSetFormData.status}
+                  onValueChange={(value) => setAdSetFormData({ ...adSetFormData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Aktiv</SelectItem>
+                    <SelectItem value="PAUSED">Pausiert</SelectItem>
+                    <SelectItem value="ARCHIVED">Archiviert</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="adset-daily-budget">Tagesbudget (€)</Label>
+                <Input
+                  id="adset-daily-budget"
+                  type="number"
+                  step="0.01"
+                  placeholder="50.00"
+                  value={adSetFormData.daily_budget || ''}
+                  onChange={(e) => setAdSetFormData({ ...adSetFormData, daily_budget: e.target.value ? parseFloat(e.target.value) : undefined })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="adset-lifetime-budget">Lebenszeitbudget (€)</Label>
+                <Input
+                  id="adset-lifetime-budget"
+                  type="number"
+                  step="0.01"
+                  placeholder="1000.00"
+                  value={adSetFormData.lifetime_budget || ''}
+                  onChange={(e) => setAdSetFormData({ ...adSetFormData, lifetime_budget: e.target.value ? parseFloat(e.target.value) : undefined })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="adset-optimization-goal">Optimierungsziel</Label>
+                <Select
+                  value={adSetFormData.optimization_goal}
+                  onValueChange={(value) => setAdSetFormData({ ...adSetFormData, optimization_goal: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CONVERSIONS">Conversions</SelectItem>
+                    <SelectItem value="REACH">Reach</SelectItem>
+                    <SelectItem value="LINK_CLICKS">Link Clicks</SelectItem>
+                    <SelectItem value="IMPRESSIONS">Impressions</SelectItem>
+                    <SelectItem value="VIDEO_VIEWS">Video Views</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="adset-billing-event">Abrechnungsereignis</Label>
+                <Select
+                  value={adSetFormData.billing_event}
+                  onValueChange={(value) => setAdSetFormData({ ...adSetFormData, billing_event: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="IMPRESSIONS">Impressions</SelectItem>
+                    <SelectItem value="LINK_CLICKS">Link Clicks</SelectItem>
+                    <SelectItem value="THRUPLAY">ThruPlay</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateAdSetDialogOpen(false)}>
+                Abbrechen
+              </Button>
+              <Button onClick={handleCreateAdSet}>
+                Erstellen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </DashboardLayout>
   );

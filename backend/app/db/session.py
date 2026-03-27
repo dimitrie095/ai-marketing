@@ -34,7 +34,7 @@ async def init_beanie_if_needed():
     
     try:
         from beanie import init_beanie
-        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport
+        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport, User
         from .models_llm import LLMProvider, LLMConfig, Conversation, Message, SyncJob, PromptTemplate
         
         # Initialize Beanie with all document models
@@ -54,10 +54,11 @@ async def init_beanie_if_needed():
                 Conversation,
                 Message,
                 SyncJob,
-                PromptTemplate
+                PromptTemplate,
+                User
             ]
         )
-        print("✅ Beanie ODM initialized successfully")
+        print("[OK] Beanie ODM initialized successfully")
         _models_initialized = True
         
     except Exception as e:
@@ -185,6 +186,14 @@ async def create_indexes():
         try:
             await db.google_ads_reports.create_index("campaign_id")
             await db.google_ads_reports.create_index("segments_date")
+        except Exception:
+            pass
+        
+        # User indexes
+        try:
+            await db.users.create_index("username", unique=True)
+            await db.users.create_index("email", unique=True)
+            await db.users.create_index("is_active")
         except Exception:
             pass
         

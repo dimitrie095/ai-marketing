@@ -61,3 +61,4 @@ if __name__ == "__main__":
     os.chdir(os.path.dirname(__file__))
     success = test_storage()
     sys.exit(0 if success else 1)
+

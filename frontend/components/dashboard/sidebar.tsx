@@ -78,7 +78,7 @@ export function Sidebar({ className }: SidebarProps) {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="w-full justify-start gap-2">
               <Avatar className="h-6 w-6">
-                <AvatarImage src="/avatars/user.png" alt="User" />
+                <AvatarImage src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" alt="User" />
                 <AvatarFallback>U</AvatarFallback>
               </Avatar>
               <span className="truncate">User</span>

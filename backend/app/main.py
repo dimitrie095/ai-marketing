@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 from dotenv import load_dotenv
+# Added comment to trigger reload
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +34,7 @@ agents_available = False
 try:
     from app.db import init_database, close_database
     db_available = True
-    logger.info("✅ Database module imported successfully")
+    logger.info("[OK] Database module imported successfully")
 except Exception as e:
     logger.warning(f"⚠️  Database module not available: {e}")
     logger.warning("   Starting without database support...")
@@ -133,11 +134,6 @@ app = FastAPI(
 )
 
 # -------------------------------
-# API Router registrieren
-# -------------------------------
-app.include_router(api_router)
-
-# -------------------------------
 # CORS Middleware hinzufügen
 # -------------------------------
 app.add_middleware(
@@ -145,8 +141,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # Next.js Frontend
         "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -154,38 +152,52 @@ app.add_middleware(
 )
 
 # -------------------------------
+# API Router registrieren
+# -------------------------------
+app.include_router(api_router)
+
+# -------------------------------
 # Health Check Endpoint
 # -------------------------------
 @app.get("/health", tags=["Health"])
 async def health_check():
     """Health check endpoint"""
-    llm_status = "unavailable"
-    agents_status = "unavailable"
-    chat_status = "unavailable"
-    
-    if llm_available:
-        providers = llm_gateway.list_available_providers()
-        llm_status = "healthy" if len(providers) > 0 else "degraded"
+    try:
+        llm_status = "unavailable"
+        agents_status = "unavailable"
+        chat_status = "unavailable"
+        llm_providers_count = 0
         
-        # Chat is available if LLM is available
-        chat_status = "healthy" if len(providers) > 0 else "degraded"
+        if llm_available:
+            try:
+                providers = llm_gateway.list_available_providers()
+                llm_providers_count = len(providers)
+                llm_status = "healthy" if llm_providers_count > 0 else "degraded"
+                chat_status = "healthy" if llm_providers_count > 0 else "degraded"
+            except Exception as e:
+                logger.error(f"Error in LLM gateway: {e}", exc_info=True)
+                llm_status = "error"
+                chat_status = "error"
         
         # Agents are available if LLM and DB are available
-        if db_available and agents_available:
+        if db_available and agents_available and llm_status == "healthy":
             agents_status = "healthy"
         else:
             agents_status = "unavailable"
-    
-    return {
-        "status": "healthy",
-        "service": "marketing-analytics-api",
-        "version": "1.0.0",
-        "database": db_available,
-        "llm": llm_status,
-        "llm_providers": len(llm_gateway.list_available_providers()) if llm_available else 0,
-        "agents": agents_status,
-        "chat": chat_status
-    }
+        
+        return {
+            "status": "healthy",
+            "service": "marketing-analytics-api",
+            "version": "1.0.0",
+            "database": db_available,
+            "llm": llm_status,
+            "llm_providers": llm_providers_count,
+            "agents": agents_status,
+            "chat": chat_status
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------------
 # Root Endpoint

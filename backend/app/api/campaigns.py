@@ -9,17 +9,29 @@ from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel
 import logging
+import uuid
 
 # Try to import database dependencies
 try:
-    from app.db.session import get_db
-    from app.db.models import Campaign, AdSet, Ad, Metric
+    from app.db.session import get_db, is_db_available
+    from app.db.models import Campaign, AdSet, Ad, Metric, User
     DB_AVAILABLE = True
     print("[Campaigns API] Database module imported successfully")
 except ImportError as e:
     DB_AVAILABLE = False
+    User = None  # type: ignore
     get_db = lambda: None
+    is_db_available = lambda: False
     print(f"[Campaigns API] Database not available, using demo mode: {e}")
+
+# Try to import authentication (optional for demo mode)
+try:
+    from app.core.auth import get_current_active_user
+    AUTH_AVAILABLE = True
+except ImportError:
+    AUTH_AVAILABLE = False
+    get_current_active_user = None  # type: ignore
+    print("[Campaigns API] Authentication not available")
 
 # Import demo storage service
 try:
@@ -30,7 +42,8 @@ try:
         add_campaign,
         update_campaign,
         delete_campaign,
-        get_default_campaigns
+        get_default_campaigns,
+        add_adset
     )
     STORAGE_AVAILABLE = True
     print("[Campaigns API] Demo storage service loaded")
@@ -41,9 +54,25 @@ except ImportError as e:
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 logger = logging.getLogger(__name__)
 
+
+# Authentication wrapper for demo mode compatibility
+async def get_current_user_or_demo():
+    """Get current user if auth available, otherwise return demo user"""
+    if AUTH_AVAILABLE and DB_AVAILABLE:
+        # Real authentication
+        return await get_current_active_user()
+    elif DB_AVAILABLE:
+        # DB available but no auth - return dummy user for now
+        # In production, you should require authentication
+        logger.warning("No authentication configured, using demo user")
+        return None
+    else:
+        # Demo mode - no authentication needed
+        return None
+
 # Initialize demo data
-if not DB_AVAILABLE and STORAGE_AVAILABLE:
-    logger.info("[Campaigns API] Initializing demo data storage...")
+if STORAGE_AVAILABLE:
+    logger.info("[Campaigns API] Loading demo data storage...")
     _demo_campaigns, _demo_adsets = load_demo_campaigns()
     logger.info(f"[Campaigns API] Loaded {len(_demo_campaigns)} campaigns from storage")
 else:
@@ -57,10 +86,12 @@ else:
 
 class CampaignCreateRequest(BaseModel):
     """Request Model für Campaign Creation"""
-    id: str
     name: str
     status: str = "ACTIVE"
     objective: Optional[str] = None
+    
+    class Config:
+        extra = "forbid"
 
 
 class CampaignUpdateRequest(BaseModel):
@@ -68,6 +99,20 @@ class CampaignUpdateRequest(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
     objective: Optional[str] = None
+    version: Optional[int] = None  # For optimistic locking
+
+
+class AdSetCreateRequest(BaseModel):
+    """Request Model für AdSet Creation"""
+    name: str
+    status: str = "ACTIVE"
+    daily_budget: Optional[float] = None
+    lifetime_budget: Optional[float] = None
+    optimization_goal: Optional[str] = None
+    billing_event: Optional[str] = None
+    
+    class Config:
+        extra = "forbid"
 
 
 class CampaignResponse(BaseModel):
@@ -148,7 +193,7 @@ async def list_campaigns(
     ```
     """
     # Return demo data if database not available
-    if not DB_AVAILABLE:
+    if not DB_AVAILABLE or not is_db_available():
         filtered = _demo_campaigns
         if status:
             filtered = [c for c in filtered if c["status"] == status]
@@ -235,8 +280,9 @@ async def get_campaign(
     ```
     """
     # Return demo data if database not available
-    if not DB_AVAILABLE:
-        print(f"[Campaigns API] Looking for campaign: {campaign_id}")
+    print(f"[Campaigns API] DB_AVAILABLE={DB_AVAILABLE}, STORAGE_AVAILABLE={STORAGE_AVAILABLE}, is_db_available={is_db_available()}")
+    if not is_db_available():
+        print(f"[Campaigns API] Looking for campaign: {campaign_id} (demo mode)")
         campaign = find_campaign(_demo_campaigns, campaign_id)
         if not campaign:
             print(f"[Campaigns API] Campaign {campaign_id} not found! Available: {[c['id'] for c in _demo_campaigns]}")
@@ -245,6 +291,22 @@ async def get_campaign(
                 detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
             )
         print(f"[Campaigns API] Found campaign: {campaign['name']}")
+        # Write debug file
+        try:
+            with open('debug_campaign.txt', 'w') as f:
+                f.write(f'Demo path triggered for {campaign_id}')
+        except Exception as e:
+            print(f"Debug write failed: {e}")
+        # Ensure campaign data is JSON serializable
+        try:
+            import json
+            json.dumps(campaign)
+        except Exception as e:
+            print(f"[Campaigns API] Campaign data not JSON serializable: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid campaign data: {e}"
+            )
         return {
             "status": "success",
             "message": "Demo-Daten (Datenbank nicht verfügbar)",
@@ -253,7 +315,7 @@ async def get_campaign(
     
     try:
         print(f"[Campaigns API] DB lookup for campaign: {campaign_id}")
-        campaign = await Campaign.find_one({"id": campaign_id})
+        campaign = await Campaign.get(campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -301,6 +363,7 @@ async def get_campaign(
 @router.post("", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     request: CampaignCreateRequest,
+    current_user=Depends(get_current_user_or_demo),
     db=Depends(get_db)
 ):
     """
@@ -310,7 +373,6 @@ async def create_campaign(
     ```
     POST /api/v1/campaigns
     {
-        "id": "23853712345678910",
         "name": "Neue Kampagne Q2 2025",
         "status": "ACTIVE",
         "objective": "CONVERSIONS"
@@ -319,9 +381,10 @@ async def create_campaign(
     """
     # Demo mode - add to demo data
     if not DB_AVAILABLE and STORAGE_AVAILABLE:
-        print(f"[Campaigns API] Creating campaign: {request.id}")
+        generated_id = uuid.uuid4().hex
+        print(f"[Campaigns API] Creating campaign with generated ID: {generated_id}")
         new_campaign = {
-            "id": request.id,
+            "id": generated_id,
             "name": request.name,
             "status": request.status,
             "objective": request.objective,
@@ -345,17 +408,15 @@ async def create_campaign(
         }
     
     try:
-        # Check if campaign already exists
-        existing = await Campaign.find_one({"id": request.id})
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Kampagne mit ID {request.id} existiert bereits"
-            )
+        # Generate unique campaign ID
+        generated_id = uuid.uuid4().hex
+        # Ensure ID is unique (extremely unlikely collision but safe)
+        while await Campaign.get(generated_id) is not None:
+            generated_id = uuid.uuid4().hex
         
         # Create campaign
         campaign = Campaign(
-            id=request.id,
+            id=generated_id,
             name=request.name,
             status=request.status,
             objective=request.objective,
@@ -386,6 +447,7 @@ async def create_campaign(
 async def update_campaign(
     campaign_id: str,
     request: CampaignUpdateRequest,
+    current_user=Depends(get_current_user_or_demo),
     db=Depends(get_db)
 ):
     """
@@ -431,24 +493,50 @@ async def update_campaign(
         }
     
     try:
-        campaign = await Campaign.find_one({"id": campaign_id})
-        if not campaign:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
-            )
-        
-        # Update fields
-        if request.name:
-            campaign.name = request.name
-        if request.status:
-            campaign.status = request.status
-        if request.objective:
-            campaign.objective = request.objective
-        
-        campaign.updated_at = datetime.utcnow()
-        
-        await campaign.save()
+        # Optimistic locking: Check version if provided
+        if request.version is not None:
+            # Use atomic update with version check to prevent race conditions
+            update_data = {
+                "updated_at": datetime.utcnow(),
+                "version": request.version + 1
+            }
+            if request.name:
+                update_data["name"] = request.name
+            if request.status:
+                update_data["status"] = request.status
+            if request.objective:
+                update_data["objective"] = request.objective
+            
+            result = await Campaign.find_one(
+                {"_id": campaign_id, "version": request.version}
+            ).update({"$set": update_data})
+            
+            if result.modified_count == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Kampagne wurde inzwischen geändert. Bitte aktualisieren und erneut versuchen."
+                )
+        else:
+            # Fallback to non-atomic update if no version provided
+            campaign = await Campaign.get(campaign_id)
+            if not campaign:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
+                )
+            
+            # Update fields
+            if request.name:
+                campaign.name = request.name
+            if request.status:
+                campaign.status = request.status
+            if request.objective:
+                campaign.objective = request.objective
+            
+            campaign.updated_at = datetime.utcnow()
+            campaign.version += 1  # Increment version
+            
+            await campaign.save()
         
         return {
             "status": "success",
@@ -470,6 +558,7 @@ async def update_campaign(
 @router.delete("/{campaign_id}", response_model=Dict[str, Any])
 async def delete_campaign(
     campaign_id: str,
+    current_user=Depends(get_current_user_or_demo),
     db=Depends(get_db)
 ):
     """
@@ -508,7 +597,7 @@ async def delete_campaign(
         }
     
     try:
-        campaign = await Campaign.find_one({"id": campaign_id})
+        campaign = await Campaign.get(campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -552,7 +641,7 @@ async def list_campaign_adsets(
     """
     try:
         # Check if campaign exists
-        campaign = await Campaign.find_one({"id": campaign_id})
+        campaign = await Campaign.get(campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -604,6 +693,119 @@ async def list_campaign_adsets(
         )
 
 
+@router.post("/{campaign_id}/adsets", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+async def create_adset(
+    campaign_id: str,
+    request: AdSetCreateRequest,
+    db=Depends(get_db)
+):
+    """
+    Neues AdSet für eine Kampagne erstellen
+    
+    Beispiel:
+    ```
+    POST /api/v1/campaigns/{campaign_id}/adsets
+    {
+        "name": "AdSet DE",
+        "status": "ACTIVE",
+        "daily_budget": 50.0,
+        "optimization_goal": "CONVERSIONS",
+        "billing_event": "IMPRESSIONS"
+    }
+    ```
+    """
+    # Demo mode - add to demo data
+    print(f"[Campaigns API] create_adset: campaign_id={campaign_id}, DB_AVAILABLE={DB_AVAILABLE}, STORAGE_AVAILABLE={STORAGE_AVAILABLE}, is_db_available={is_db_available()}")
+    if not is_db_available():
+        if STORAGE_AVAILABLE:
+            generated_id = uuid.uuid4().hex
+            print(f"[Campaigns API] Creating adset with generated ID: {generated_id} for campaign {campaign_id}")
+            new_adset = {
+                "id": generated_id,
+                "campaign_id": campaign_id,
+                "name": request.name,
+                "status": request.status,
+                "daily_budget": request.daily_budget,
+                "lifetime_budget": request.lifetime_budget,
+                "optimization_goal": request.optimization_goal,
+                "billing_event": request.billing_event,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "synced_at": None,
+                "ads_count": 0
+            }
+            # Use storage service to add adset
+            try:
+                _demo_campaigns[:], _demo_adsets = add_adset(_demo_campaigns, _demo_adsets, new_adset)
+                if save_demo_campaigns(_demo_campaigns, _demo_adsets):
+                    logger.info("AdSet saved to storage")
+                else:
+                    logger.warning("Failed to save AdSet to storage")
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Demo: {str(e)}"
+                )
+            return {
+                "status": "success",
+                "message": "Demo: AdSet erstellt (Datenbank nicht verfügbar)",
+                "data": new_adset
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database not available and demo storage not available"
+            )
+    
+    try:
+        # Check if campaign exists
+        campaign = await Campaign.get(campaign_id)
+        if not campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Kampagne mit ID {campaign_id} nicht gefunden"
+            )
+        
+        # Generate unique adset ID
+        generated_id = uuid.uuid4().hex
+        # Ensure ID is unique
+        while await AdSet.get(generated_id) is not None:
+            generated_id = uuid.uuid4().hex
+        
+        # Create adset
+        adset = AdSet(
+            id=generated_id,
+            campaign_id=campaign_id,
+            name=request.name,
+            status=request.status,
+            daily_budget=Decimal(request.daily_budget) if request.daily_budget else None,
+            lifetime_budget=Decimal(request.lifetime_budget) if request.lifetime_budget else None,
+            optimization_goal=request.optimization_goal,
+            billing_event=request.billing_event,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        
+        await adset.save()
+        
+        return {
+            "status": "success",
+            "message": "AdSet erfolgreich erstellt",
+            "data": {
+                "id": adset.id,
+                "name": adset.name,
+                "campaign_id": adset.campaign_id
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler beim Erstellen des AdSets: {str(e)}"
+        )
+
+
 # ============================================
 # Ad Endpoints
 # ============================================
@@ -625,7 +827,7 @@ async def list_campaign_ads(
     """
     try:
         # Check if campaign exists
-        campaign = await Campaign.find_one({"id": campaign_id})
+        campaign = await Campaign.get(campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -701,7 +903,7 @@ async def get_campaign_hierarchy(
     """
     try:
         # Get campaign
-        campaign = await Campaign.find_one({"id": campaign_id})
+        campaign = await Campaign.get(campaign_id)
         if not campaign:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

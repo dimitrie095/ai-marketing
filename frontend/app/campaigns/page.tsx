@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import * as yup from "yup";
+import DOMPurify from 'dompurify';
+import { withAuth } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from "@/components/dashboard/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +48,21 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
 
+// Validation schema for campaign forms
+const campaignSchema = yup.object({
+  name: yup.string()
+    .required('Campaign name is required')
+    .min(3, 'Name must be at least 3 characters')
+    .max(100, 'Name must not exceed 100 characters')
+    .trim(),
+  status: yup.string()
+    .required('Status is required')
+    .oneOf(['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED'], 'Invalid status'),
+  objective: yup.string()
+    .required('Objective is required')
+    .oneOf(['CONVERSIONS', 'LEAD_GENERATION', 'TRAFFIC', 'AWARENESS', 'ENGAGEMENT'], 'Invalid objective'),
+});
+
 interface CampaignWithMetrics extends Campaign {
   total_spend: number;
   total_revenue: number;
@@ -53,7 +71,7 @@ interface CampaignWithMetrics extends Campaign {
   roas?: number;
 }
 
-export default function CampaignsPage() {
+function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,11 +107,22 @@ export default function CampaignsPage() {
       if (response.status === "success" || response.status === "no_data") {
         const campaignsData = response.data || [];
         // Enrich with calculated metrics
-        const enriched = campaignsData.map((c: CampaignWithMetrics) => ({
-          ...c,
-          roas: c.total_spend > 0 ? c.total_revenue / c.total_spend : 0,
-          ctr: Math.random() * 5 + 1, // Simulated CTR for demo
-        }));
+        const enriched = campaignsData.map((c: CampaignWithMetrics) => {
+          // Calculate CTR based on actual metrics if available
+          let ctr = 0;
+          if (c.clicks && c.impressions && c.impressions > 0) {
+            ctr = (c.clicks / c.impressions) * 100;
+          } else if (c.ad_sets_count && c.ad_sets_count > 0) {
+            // Fallback: estimate based on ad set count and ROAS if no click/impression data
+            ctr = Math.max(1.5, Math.min(4.5, (c.roas || 1) * 1.2));
+          }
+          
+          return {
+            ...c,
+            roas: c.total_spend > 0 ? c.total_revenue / c.total_spend : 0,
+            ctr: Number(ctr.toFixed(2)),
+          };
+        });
         setCampaigns(enriched);
       } else {
         setError("Fehler beim Laden der Kampagnen");
@@ -108,41 +137,83 @@ export default function CampaignsPage() {
 
   const handleCreate = async () => {
     try {
-      // Generate ID if not provided
-      const campaignData = {
-        ...formData,
-        id: formData.id || `camp_${Date.now().toString(36)}`,
+      // 1. Validate input data
+      await campaignSchema.validate(formData, { abortEarly: false });
+      
+      // 2. Sanitize input to prevent XSS
+      const sanitizedData = {
+        name: DOMPurify.sanitize(formData.name),
+        status: formData.status,
+        objective: formData.objective,
       };
-      const response = await createCampaign(campaignData);
+      
+      const response = await createCampaign(sanitizedData);
+      
+      // 3. Validate response
+      if (!response || typeof response !== "object") {
+        throw new Error("Ungültiges API-Response");
+      }
+      
       if (response.status === "success") {
         setIsCreateDialogOpen(false);
         setFormData({ id: "", name: "", status: "ACTIVE", objective: "CONVERSIONS" });
+        setError(null);
         loadCampaigns();
       } else {
-        setError("Fehler beim Erstellen der Kampagne");
+        throw new Error(response.message || "Erstellen fehlgeschlagen");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const errorMessage =
+        err instanceof yup.ValidationError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      setError(errorMessage);
     }
   };
 
   const handleUpdate = async () => {
     if (!selectedCampaign) return;
+    
     try {
-      const response = await updateCampaign(selectedCampaign.id, {
-        name: formData.name,
+      // 1. Validate input data
+      await campaignSchema.validate(formData, { abortEarly: false });
+      
+      // 2. Sanitize input to prevent XSS
+      const sanitizedData = {
+        name: DOMPurify.sanitize(formData.name),
         status: formData.status,
         objective: formData.objective,
-      });
+        version: selectedCampaign.version || 1, // Include version for optimistic locking
+      };
+      
+      const response = await updateCampaign(selectedCampaign.id, sanitizedData);
+      
+      // 3. Validate response
+      if (!response || typeof response !== "object") {
+        throw new Error("Ungültiges API-Response");
+      }
+      
       if (response.status === "success") {
         setIsEditDialogOpen(false);
         setSelectedCampaign(null);
+        setError(null);
         loadCampaigns();
+      } else if (response.status === "conflict") {
+        setError("Kampagne wurde inzwischen geändert. Bitte aktualisieren und erneut versuchen.");
+        loadCampaigns(); // Refresh data
       } else {
-        setError("Fehler beim Aktualisieren der Kampagne");
+        throw new Error(response.message || "Update fehlgeschlagen");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const errorMessage =
+        err instanceof yup.ValidationError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      setError(errorMessage);
     }
   };
 
@@ -257,18 +328,7 @@ export default function CampaignsPage() {
                     placeholder="Kampagnenname"
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="id">Kampagnen-ID (optional)</Label>
-                  <Input
-                    id="id"
-                    value={formData.id}
-                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-                    placeholder="Wird automatisch generiert wenn leer"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Wenn leer, wird eine ID automatisch generiert
-                  </p>
-                </div>
+
                 <div className="grid gap-2">
                   <Label htmlFor="status">Status</Label>
                   <Select
@@ -525,3 +585,5 @@ export default function CampaignsPage() {
     </DashboardLayout>
   );
 }
+
+export default withAuth(CampaignsPage);

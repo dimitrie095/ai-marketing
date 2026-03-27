@@ -5,6 +5,8 @@ Handles storage and loading of demo campaigns in JSON format
 
 import json
 import os
+import threading
+import fcntl
 from datetime import datetime
 from typing import Tuple, List, Dict, Any
 import logging
@@ -14,6 +16,9 @@ logger = logging.getLogger(__name__)
 # Use a more robust path - in the project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DEMO_DATA_FILE = os.path.join(PROJECT_ROOT, "demo_data", "campaigns.json")
+
+# Thread-safe file operations lock
+_file_lock = threading.Lock()
 
 def ensure_data_directory():
     """Ensure the demo_data directory exists"""
@@ -49,9 +54,10 @@ def load_demo_campaigns() -> Tuple[List[Dict], Dict]:
 
 def save_demo_campaigns(campaigns: List[Dict], adsets: Dict[str, List]) -> bool:
     """
-    Save demo campaigns to JSON file
+    Save demo campaigns to JSON file (thread-safe with atomic operations)
     Returns: True if successful, False otherwise
     """
+    temp_file = None
     try:
         ensure_data_directory()
         
@@ -62,15 +68,34 @@ def save_demo_campaigns(campaigns: List[Dict], adsets: Dict[str, List]) -> bool:
             "last_updated": datetime.utcnow().isoformat()
         }
         
-        # Write to file
-        with open(DEMO_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        # Thread-safe file operation with atomic write
+        with _file_lock:
+            # Write to temporary file first
+            temp_file = f"{DEMO_DATA_FILE}.tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                # File locking for extra safety on Unix systems
+                if hasattr(fcntl, 'flock'):
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                
+                if hasattr(fcntl, 'flock'):
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            
+            # Atomic rename to ensure consistency
+            os.replace(temp_file, DEMO_DATA_FILE)
         
         logger.info(f"[Demo Storage] Successfully saved {len(campaigns)} campaigns to file")
         return True
         
     except Exception as e:
         logger.error(f"[Demo Storage] Error saving campaigns: {e}")
+        # Clean up temp file if it exists
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
         return False
 
 def get_default_campaigns():
@@ -166,5 +191,41 @@ def delete_campaign(campaigns: List[Dict], adsets: Dict[str, List], campaign_id:
     """Delete a campaign and its adsets"""
     new_campaigns = [c for c in campaigns if c.get("id") != campaign_id]
     new_adsets = {cid: adsets for cid, adsets in adsets.items() if cid != campaign_id}
+    
+    return new_campaigns, new_adsets
+
+
+def add_adset(campaigns: List[Dict], adsets: Dict[str, List], adset: Dict) -> Tuple[List, Dict]:
+    """Add a new adset to a campaign"""
+    new_campaigns = campaigns.copy()
+    new_adsets = adsets.copy()
+    
+    campaign_id = adset.get("campaign_id")
+    if not campaign_id:
+        raise ValueError("AdSet must have campaign_id")
+    
+    # Ensure campaign exists
+    campaign_exists = any(c.get("id") == campaign_id for c in new_campaigns)
+    if not campaign_exists:
+        raise ValueError(f"Campaign {campaign_id} does not exist")
+    
+    # Initialize list if not present
+    if campaign_id not in new_adsets:
+        new_adsets[campaign_id] = []
+    
+    # Check if adset already exists (by id)
+    existing_ids = {a.get("id") for a in new_adsets[campaign_id]}
+    if adset.get("id") in existing_ids:
+        raise ValueError(f"AdSet with id {adset.get('id')} already exists")
+    
+    # Add adset
+    new_adsets[campaign_id].append(adset)
+    
+    # Update campaign's ad_sets_count
+    for campaign in new_campaigns:
+        if campaign.get("id") == campaign_id:
+            campaign["ad_sets_count"] = len(new_adsets[campaign_id])
+            campaign["updated_at"] = datetime.utcnow().isoformat()
+            break
     
     return new_campaigns, new_adsets
