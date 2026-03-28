@@ -218,6 +218,7 @@ export default function CampaignDetailPage() {
   const [notes, setNotes] = useState<{ id: string; text: string; createdAt: string }[]>([]);
   const [adSetAction, setAdSetAction] = useState<{ id: string; name: string; type: 'pause' | 'delete' } | null>(null);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
   
   // Form states
   const [formData, setFormData] = useState({
@@ -452,56 +453,101 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const toHtml = (text: string) =>
+    text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br/>');
+
+  const Md = ({ text }: { text: string }) => (
+    <span dangerouslySetInnerHTML={{ __html: toHtml(text) }} />
+  );
+
   const renderAIInsights = (insights: any) => {
-    if (typeof insights === 'string') {
-      // Try to split into sections based on common patterns
-      const lines = insights.split('\n').filter(line => line.trim());
-      if (lines.length === 1) {
-        return <p>{insights}</p>;
-      }
+    if (!insights) return null;
+
+    if (insights.error) {
       return (
-        <ul className="space-y-2">
-          {lines.map((line, idx) => (
-            <li key={idx} className="pl-4">{line}</li>
-          ))}
-        </ul>
-      );
-    } else if (insights && typeof insights === 'object') {
-      // Check for structured fields
-      const { summary, changes, causes, recommendations } = insights;
-      return (
-        <div className="space-y-4">
-          {summary && (
-            <div>
-              <h4 className="font-semibold text-purple-700">Zusammenfassung</h4>
-              <p>{summary}</p>
-            </div>
-          )}
-          {changes && (
-            <div>
-              <h4 className="font-semibold text-purple-700">Hauptveränderungen</h4>
-              <p>{changes}</p>
-            </div>
-          )}
-          {causes && (
-            <div>
-              <h4 className="font-semibold text-purple-700">Ursachenanalyse</h4>
-              <p>{causes}</p>
-            </div>
-          )}
-          {recommendations && (
-            <div>
-              <h4 className="font-semibold text-purple-700">Empfehlungen</h4>
-              <p>{recommendations}</p>
-            </div>
-          )}
-          {!summary && !changes && !causes && !recommendations && (
-            <pre className="whitespace-pre-wrap">{JSON.stringify(insights, null, 2)}</pre>
-          )}
-        </div>
+        <p className="text-sm text-red-600 dark:text-red-400">{insights.error}</p>
       );
     }
-    return <p>Keine Insights verfügbar.</p>;
+
+    if (typeof insights === 'string') {
+      return <p className="text-sm"><Md text={insights} /></p>;
+    }
+
+    const { summary, key_insights, recommendations, strong_areas, weak_areas } = insights;
+    const hasContent = summary || key_insights?.length || recommendations?.length || strong_areas?.length || weak_areas?.length;
+
+    if (!hasContent) {
+      return <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(insights, null, 2)}</pre>;
+    }
+
+    return (
+      <div className="space-y-4">
+        {summary && (
+          <div>
+            <h4 className="font-semibold text-purple-700 dark:text-purple-300 mb-1">Zusammenfassung</h4>
+            <p className="text-sm"><Md text={summary} /></p>
+          </div>
+        )}
+        {key_insights?.length > 0 && (
+          <div>
+            <h4 className="font-semibold text-purple-700 dark:text-purple-300 mb-1">Wichtigste Erkenntnisse</h4>
+            <ul className="space-y-1">
+              {key_insights.map((insight: string, idx: number) => (
+                <li key={idx} className="text-sm flex gap-2">
+                  <span className="text-purple-500 shrink-0">•</span>
+                  <Md text={insight} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {strong_areas?.length > 0 && (
+          <div>
+            <h4 className="font-semibold text-green-700 dark:text-green-300 mb-1">Stärken</h4>
+            <ul className="space-y-1">
+              {strong_areas.map((area: string, idx: number) => (
+                <li key={idx} className="text-sm flex gap-2">
+                  <span className="text-green-500 shrink-0">✓</span>
+                  <Md text={area} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {weak_areas?.length > 0 && (
+          <div>
+            <h4 className="font-semibold text-amber-700 dark:text-amber-300 mb-1">Verbesserungsbedarf</h4>
+            <ul className="space-y-1">
+              {weak_areas.map((area: string, idx: number) => (
+                <li key={idx} className="text-sm flex gap-2">
+                  <span className="text-amber-500 shrink-0">⚠</span>
+                  <Md text={area} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {recommendations?.length > 0 && (
+          <div>
+            <h4 className="font-semibold text-blue-700 dark:text-blue-300 mb-1">Empfehlungen</h4>
+            <ul className="space-y-1">
+              {recommendations.map((rec: string, idx: number) => (
+                <li key={idx} className="text-sm flex gap-2">
+                  <span className="text-blue-500 shrink-0 font-bold">{idx + 1}.</span>
+                  <Md text={rec} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const transformRootCauseData = (data: any) => {
@@ -899,21 +945,26 @@ export default function CampaignDetailPage() {
   };
 
   const loadAiInsights = async () => {
+    setIsAiDialogOpen(true);
+    setAiInsights(null);
+    setRootCauseData(null);
+    setRootCauseError(null);
     try {
       setIsAiAnalyzing(true);
-      
       const response = await getAIInsights(
         [campaignId],
         dateRange.startDate,
         dateRange.endDate,
         "Analysiere diese Kampagne und gib Optimierungsempfehlungen"
       );
-      
-      if (response.status === "success") {
-        setAiInsights(response.insights || response.analysis);
+      if (response.success) {
+        setAiInsights(response.data?.analysis);
+      } else {
+        setAiInsights({ error: response.error || 'Analyse fehlgeschlagen.' });
       }
     } catch (err) {
       console.error("AI analysis error:", err);
+      setAiInsights({ error: err instanceof Error ? err.message : 'Unbekannter Fehler' });
     } finally {
       setIsAiAnalyzing(false);
     }
@@ -2535,6 +2586,106 @@ export default function CampaignDetailPage() {
               <Button variant="destructive" onClick={handleAdSetAction}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Endgültig löschen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* KI-Analyse Dialog */}
+        <Dialog open={isAiDialogOpen} onOpenChange={setIsAiDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900">
+                  <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <DialogTitle>KI-Analyse</DialogTitle>
+                  <DialogDescription>
+                    {campaign?.name} · {dateRange.startDate} – {dateRange.endDate}
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-5 py-2">
+              {/* KI Insights Section */}
+              <div className="rounded-lg border bg-purple-50 dark:bg-purple-950/30 p-4">
+                <h3 className="flex items-center gap-2 font-semibold text-purple-800 dark:text-purple-300 mb-3">
+                  <Brain className="h-4 w-4" />
+                  KI-Insights & Empfehlungen
+                </h3>
+                {isAiAnalyzing ? (
+                  <div className="flex items-center gap-3 py-6 justify-center text-muted-foreground">
+                    <RefreshCw className="h-5 w-5 animate-spin" />
+                    <span>Analyse läuft…</span>
+                  </div>
+                ) : aiInsights ? (
+                  <div className="text-sm">{renderAIInsights(aiInsights)}</div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">Keine Insights verfügbar.</p>
+                )}
+              </div>
+
+              {/* Root Cause Section */}
+              <div className="rounded-lg border bg-orange-50 dark:bg-orange-950/30 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="flex items-center gap-2 font-semibold text-orange-800 dark:text-orange-300">
+                    <AlertCircle className="h-4 w-4" />
+                    Ursachenanalyse (Root Cause)
+                  </h3>
+                  {rootCauseData && (
+                    <Button variant="ghost" size="sm" onClick={() => { setRootCauseData(null); setRootCauseError(null); }}>
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Neu
+                    </Button>
+                  )}
+                </div>
+
+                {loadingRootCause ? (
+                  <div className="flex items-center gap-3 py-6 justify-center text-muted-foreground">
+                    <RefreshCw className="h-5 w-5 animate-spin" />
+                    <span>Ursachenanalyse läuft…</span>
+                  </div>
+                ) : rootCauseData ? (
+                  <div className="text-sm">
+                    {rootCauseData.tree ? (
+                      <div className="border rounded-lg p-3 bg-white dark:bg-background">
+                        <RootCauseTree data={rootCauseData.tree} />
+                      </div>
+                    ) : (
+                      <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(rootCauseData, null, 2)}</pre>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    {rootCauseError && (
+                      <p className="text-sm text-red-600 dark:text-red-400">{rootCauseError}</p>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadRootCauseAnalysis}
+                      disabled={loadingRootCause}
+                    >
+                      <AlertCircle className="mr-2 h-4 w-4" />
+                      Ursachenanalyse starten
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Identifiziert die Hauptfaktoren für Performance-Veränderungen
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAiDialogOpen(false)}>
+                Schließen
+              </Button>
+              <Button onClick={loadAiInsights} disabled={isAiAnalyzing}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Neu analysieren
               </Button>
             </DialogFooter>
           </DialogContent>
