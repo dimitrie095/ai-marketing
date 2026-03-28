@@ -1691,13 +1691,23 @@ export default function CampaignDetailPage() {
                         Stellen Sie eine Frage zur Kampagne.
                       </div>
                     ) : (
-                      chatMessages.map((msg, idx) => (
-                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-xs lg:max-w-md xl:max-w-lg rounded-lg px-4 py-2 text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-                            {msg.content}
+                      chatMessages.map((msg, idx) => {
+                        const html = msg.content
+                          .replace(/&/g, '&amp;')
+                          .replace(/</g, '&lt;')
+                          .replace(/>/g, '&gt;')
+                          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                          .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                          .replace(/\n/g, '<br/>');
+                        return (
+                          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                              className={`max-w-xs lg:max-w-md xl:max-w-lg rounded-lg px-4 py-2 text-sm ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+                              dangerouslySetInnerHTML={{ __html: html }}
+                            />
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                     {loadingChat && (
                       <div className="flex justify-start">
