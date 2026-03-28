@@ -36,7 +36,6 @@ class CampaignUpdateRequest(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
     objective: Optional[str] = None
-    version: Optional[int] = None  # For optimistic locking
 
 
 class AdSetCreateRequest(BaseModel):
@@ -251,39 +250,21 @@ async def update_campaign(
     db=Depends(get_db),
 ):
     try:
-        if request.version is not None:
-            update_data: Dict[str, Any] = {
-                "updated_at": datetime.utcnow(),
-                "version": request.version + 1,
-            }
-            if request.name:
-                update_data["name"] = request.name
-            if request.status:
-                update_data["status"] = request.status
-            if request.objective:
-                update_data["objective"] = request.objective
-
-            result = await Campaign.find_one(
-                {"_id": campaign_id, "version": request.version}
-            ).update({"$set": update_data})
-
-            if result.modified_count == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Kampagne wurde inzwischen geändert. Bitte aktualisieren und erneut versuchen.",
-                )
-            campaign = await _get_campaign_or_404(campaign_id)
-        else:
-            campaign = await _get_campaign_or_404(campaign_id)
-            if request.name:
-                campaign.name = request.name
-            if request.status:
-                campaign.status = request.status
-            if request.objective:
-                campaign.objective = request.objective
-            campaign.updated_at = datetime.utcnow()
-            campaign.version = getattr(campaign, "version", 0) + 1
-            await campaign.save()
+        campaign = await _get_campaign_or_404(campaign_id)
+        update_fields: Dict[str, Any] = {
+            "updated_at": datetime.utcnow(),
+            "version": getattr(campaign, "version", 0) + 1,
+        }
+        if request.name is not None and request.name != "":
+            update_fields["name"] = request.name
+        if request.status is not None and request.status != "":
+            update_fields["status"] = request.status
+        if request.objective is not None:
+            update_fields["objective"] = request.objective
+        await Campaign.find_one(Campaign.id == campaign_id).update(
+            {"$set": update_fields}
+        )
+        campaign = await _get_campaign_or_404(campaign_id)
 
         return {
             "status": "success",
@@ -410,6 +391,86 @@ async def create_adset(
     except Exception as e:
         logger.exception("create_adset failed")
         raise HTTPException(status_code=500, detail=f"Fehler beim Erstellen des AdSets: {e}")
+
+
+# ============================================
+# AdSet Update / Delete
+# ============================================
+
+class AdSetUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+    daily_budget: Optional[float] = None
+    lifetime_budget: Optional[float] = None
+    optimization_goal: Optional[str] = None
+
+
+@router.put("/{campaign_id}/adsets/{adset_id}", response_model=Dict[str, Any])
+async def update_adset(
+    campaign_id: str,
+    adset_id: str,
+    request: AdSetUpdateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db=Depends(get_db),
+):
+    try:
+        await _get_campaign_or_404(campaign_id)
+        adset = await AdSet.get(adset_id)
+        if not adset or adset.campaign_id != campaign_id:
+            raise HTTPException(status_code=404, detail=f"AdSet {adset_id} nicht gefunden")
+
+        update_fields: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+        if request.name is not None and request.name != "":
+            update_fields["name"] = request.name
+        if request.status is not None and request.status != "":
+            update_fields["status"] = request.status
+        if request.daily_budget is not None:
+            update_fields["daily_budget"] = Decimal(str(request.daily_budget))
+        if request.lifetime_budget is not None:
+            update_fields["lifetime_budget"] = Decimal(str(request.lifetime_budget))
+        if request.optimization_goal is not None:
+            update_fields["optimization_goal"] = request.optimization_goal
+
+        await AdSet.find_one(AdSet.id == adset_id).update({"$set": update_fields})
+        adset = await AdSet.get(adset_id)
+
+        return {
+            "status": "success",
+            "message": "AdSet erfolgreich aktualisiert",
+            "data": {"id": adset.id, "name": adset.name, "status": adset.status},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("update_adset failed")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des AdSets: {e}")
+
+
+@router.delete("/{campaign_id}/adsets/{adset_id}", response_model=Dict[str, Any])
+async def delete_adset(
+    campaign_id: str,
+    adset_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db=Depends(get_db),
+):
+    try:
+        await _get_campaign_or_404(campaign_id)
+        adset = await AdSet.get(adset_id)
+        if not adset or adset.campaign_id != campaign_id:
+            raise HTTPException(status_code=404, detail=f"AdSet {adset_id} nicht gefunden")
+
+        await Ad.find({"ad_set_id": adset_id}).delete()
+        await adset.delete()
+
+        return {
+            "status": "success",
+            "message": "AdSet und zugehörige Ads erfolgreich gelöscht",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("delete_adset failed")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen des AdSets: {e}")
 
 
 # ============================================

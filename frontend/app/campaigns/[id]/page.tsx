@@ -82,6 +82,8 @@ import {
   deleteCampaign,
   getAIInsights,
   createAdSet,
+  updateAdSet,
+  deleteAdSet,
   getPeriodComparison,
   getMetricsBreakdown,
   getRootCauseAnalysis,
@@ -203,6 +205,8 @@ export default function CampaignDetailPage() {
   
   // Dialog states
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isCreateAdSetDialogOpen, setIsCreateAdSetDialogOpen] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
@@ -211,6 +215,7 @@ export default function CampaignDetailPage() {
   const [isDuplicateConfirmOpen, setIsDuplicateConfirmOpen] = useState(false);
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
+  const [notes, setNotes] = useState<{ id: string; text: string; createdAt: string }[]>([]);
   const [adSetAction, setAdSetAction] = useState<{ id: string; name: string; type: 'pause' | 'delete' } | null>(null);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   
@@ -772,16 +777,20 @@ export default function CampaignDetailPage() {
   };
 
   const handleUpdate = async () => {
+    setIsSavingEdit(true);
+    setEditError(null);
     try {
       const response = await updateCampaign(campaignId, formData);
       if (response.status === "success") {
         setIsEditDialogOpen(false);
-        loadCampaignData();
+        await loadCampaignData();
       } else {
-        setError("Fehler beim Aktualisieren");
+        setEditError(response.detail || "Fehler beim Aktualisieren. Bitte erneut versuchen.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Aktualisieren");
+      setEditError(err instanceof Error ? err.message : "Fehler beim Aktualisieren.");
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -862,6 +871,11 @@ export default function CampaignDetailPage() {
   };
 
   const handleSaveNote = () => {
+    if (!noteText.trim()) return;
+    setNotes(prev => [
+      { id: crypto.randomUUID(), text: noteText.trim(), createdAt: new Date().toISOString() },
+      ...prev,
+    ]);
     setIsNoteDialogOpen(false);
     setNoteText('');
   };
@@ -870,14 +884,17 @@ export default function CampaignDetailPage() {
     if (!adSetAction) return;
     try {
       if (adSetAction.type === 'delete') {
-        // Placeholder – real: await deleteAdSet(adSetAction.id)
+        await deleteAdSet(campaignId, adSetAction.id);
       } else {
-        // Placeholder – real: await updateAdSet(adSetAction.id, { status: ... })
+        const current = adSets.find(a => a.id === adSetAction.id);
+        const newStatus = current?.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+        await updateAdSet(campaignId, adSetAction.id, { status: newStatus });
       }
       setAdSetAction(null);
-      loadCampaignData();
+      await loadCampaignData();
     } catch (err) {
       setError('Fehler bei der AdSet-Aktion');
+      setAdSetAction(null);
     }
   };
 
@@ -1091,7 +1108,7 @@ export default function CampaignDetailPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setIsEditDialogOpen(true)}>
+                <DropdownMenuItem onClick={() => { setEditError(null); setIsEditDialogOpen(true); }}>
                   <Edit className="mr-2 h-4 w-4" />
                   Bearbeiten
                 </DropdownMenuItem>
@@ -1988,7 +2005,7 @@ export default function CampaignDetailPage() {
                 </div>
               </CardContent>
               <CardFooter>
-                <Button onClick={() => setIsEditDialogOpen(true)}>
+                <Button onClick={() => { setEditError(null); setIsEditDialogOpen(true); }}>
                   <Edit className="mr-2 h-4 w-4" />
                   Bearbeiten
                 </Button>
@@ -2024,6 +2041,55 @@ export default function CampaignDetailPage() {
               </CardContent>
             </Card>
 
+            {/* Notes */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      Notizen
+                    </CardTitle>
+                    <CardDescription>Interne Notizen zu dieser Kampagne</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setIsNoteDialogOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Neue Notiz
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {notes.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <MessageSquare className="h-8 w-8 mb-2 opacity-30" />
+                    <p className="text-sm">Noch keine Notizen vorhanden.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {notes.map(note => (
+                      <div key={note.id} className="flex gap-3 rounded-md border p-3">
+                        <MessageSquare className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm whitespace-pre-wrap break-words">{note.text}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {format(new Date(note.createdAt), "dd. MMM yyyy, HH:mm 'Uhr'", { locale: de })}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => setNotes(prev => prev.filter(n => n.id !== note.id))}
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card className="border-destructive">
               <CardHeader>
                 <CardTitle className="text-destructive">Gefahrenzone</CardTitle>
@@ -2045,12 +2111,12 @@ export default function CampaignDetailPage() {
         </Tabs>
 
         {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <Dialog open={isEditDialogOpen} onOpenChange={(open) => { if (!isSavingEdit) { setIsEditDialogOpen(open); setEditError(null); } }}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Kampagne bearbeiten</DialogTitle>
               <DialogDescription>
-                Ändern Sie die Details Ihrer Kampagne
+                Änderungen an Name, Status und Zielsetzung werden direkt gespeichert.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -2059,6 +2125,7 @@ export default function CampaignDetailPage() {
                 <Input
                   id="name"
                   value={formData.name}
+                  disabled={isSavingEdit}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 />
               </div>
@@ -2066,6 +2133,7 @@ export default function CampaignDetailPage() {
                 <Label htmlFor="status">Status</Label>
                 <Select
                   value={formData.status}
+                  disabled={isSavingEdit}
                   onValueChange={(value) => setFormData({ ...formData, status: value })}
                 >
                   <SelectTrigger>
@@ -2082,6 +2150,7 @@ export default function CampaignDetailPage() {
                 <Label htmlFor="objective">Zielsetzung</Label>
                 <Select
                   value={formData.objective}
+                  disabled={isSavingEdit}
                   onValueChange={(value) => setFormData({ ...formData, objective: value })}
                 >
                   <SelectTrigger>
@@ -2095,13 +2164,23 @@ export default function CampaignDetailPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {editError && (
+                <div className="rounded-md bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {editError}
+                </div>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button variant="outline" disabled={isSavingEdit} onClick={() => { setIsEditDialogOpen(false); setEditError(null); }}>
                 Abbrechen
               </Button>
-              <Button onClick={handleUpdate}>
-                Speichern
+              <Button onClick={handleUpdate} disabled={isSavingEdit || !formData.name.trim()}>
+                {isSavingEdit ? (
+                  <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Speichern…</>
+                ) : (
+                  <>Speichern</>
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -2392,33 +2471,43 @@ export default function CampaignDetailPage() {
           </DialogContent>
         </Dialog>
 
-        {/* AdSet Action Dialogs (Pausieren / Löschen) */}
+        {/* AdSet Action Dialogs (Pausieren / Aktivieren / Löschen) */}
         <Dialog open={adSetAction?.type === 'pause'} onOpenChange={(open) => !open && setAdSetAction(null)}>
           <DialogContent>
-            <DialogHeader>
-              <div className="flex items-center gap-3 mb-1">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                </div>
-                <DialogTitle className="text-amber-600 dark:text-amber-400">AdSet pausieren?</DialogTitle>
-              </div>
-              <DialogDescription>
-                Das AdSet <strong className="text-foreground">{adSetAction?.name}</strong> wird pausiert.
-                Alle zugehörigen Ads werden gestoppt.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAdSetAction(null)}>
-                Abbrechen
-              </Button>
-              <Button
-                className="bg-amber-500 hover:bg-amber-600 text-white"
-                onClick={handleAdSetAction}
-              >
-                <Pause className="mr-2 h-4 w-4" />
-                Pausieren
-              </Button>
-            </DialogFooter>
+            {(() => {
+              const currentAdSet = adSets.find(a => a.id === adSetAction?.id);
+              const isActive = currentAdSet?.status === 'ACTIVE';
+              return (
+                <>
+                  <DialogHeader>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-full ${isActive ? 'bg-amber-100 dark:bg-amber-900' : 'bg-green-100 dark:bg-green-900'}`}>
+                        {isActive
+                          ? <Pause className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                          : <Play className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        }
+                      </div>
+                      <DialogTitle className={isActive ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}>
+                        AdSet {isActive ? 'pausieren' : 'aktivieren'}?
+                      </DialogTitle>
+                    </div>
+                    <DialogDescription>
+                      Das AdSet <strong className="text-foreground">{adSetAction?.name}</strong> wird{' '}
+                      {isActive ? 'pausiert. Alle zugehörigen Ads werden gestoppt.' : 'aktiviert. Alle zugehörigen Ads werden gestartet.'}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setAdSetAction(null)}>Abbrechen</Button>
+                    <Button
+                      className={isActive ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}
+                      onClick={handleAdSetAction}
+                    >
+                      {isActive ? <><Pause className="mr-2 h-4 w-4" />Pausieren</> : <><Play className="mr-2 h-4 w-4" />Aktivieren</>}
+                    </Button>
+                  </DialogFooter>
+                </>
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
