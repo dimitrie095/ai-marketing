@@ -56,7 +56,7 @@ import {
   Zap,
   ArrowRightLeft,
 } from "lucide-react";
-import { format, subDays, startOfMonth, endOfMonth } from "date-fns";
+import { format, subDays, startOfMonth, endOfMonth, setYear } from "date-fns";
 import { de } from "date-fns/locale";
 import { 
   getAnalyticsSummary, 
@@ -109,9 +109,15 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 
 export default function AnalyticsPage() {
   // State
+  // Adjust date to 2025 to match database metrics (campaigns are Q1 2025)
+  const adjustTo2025 = (date: Date) => {
+    return setYear(date, 2025);
+  };
+  const today = new Date();
+  const adjustedToday = adjustTo2025(today);
   const [dateRange, setDateRange] = useState<DateRange>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
+    from: subDays(adjustedToday, 30),
+    to: adjustedToday,
   });
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(true);
@@ -139,7 +145,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     loadAnalyticsData();
     loadCampaigns();
-  }, [dateRange]);
+  }, [dateRange, groupBy]);
 
   const loadAnalyticsData = async () => {
     try {
@@ -167,7 +173,23 @@ export default function AnalyticsPage() {
         setCampaigns(campaignsRes.campaigns);
       }
       if (breakdownRes.status === 'success') {
-        setBreakdown(breakdownRes.breakdown);
+        const raw = breakdownRes.breakdown;
+        // Transform backend structure to frontend expected format
+        if (raw.categories) {
+          const transformed = {
+            labels: raw.categories,
+            spend: raw.data?.spend || [],
+            revenue: raw.data?.revenue || [],
+            conversions: raw.data?.conversions || [],
+            impressions: raw.data?.impressions || [],
+            clicks: raw.data?.clicks || [],
+            roas: raw.data?.roas || [],
+            ctr: raw.data?.ctr || [],
+          };
+          setBreakdown(transformed);
+        } else {
+          setBreakdown(raw);
+        }
       }
     } catch (err) {
       console.error('Analytics load error:', err);
