@@ -248,6 +248,35 @@ class GoogleAdsReport(Document):
         ]
 
 
+class AnalysisResult(Document):
+    """Saved root cause analysis results"""
+    analysis_id: str
+    campaign_id: str
+    metric_name: str
+    period_current: str
+    period_previous: Optional[str] = None
+    current_value: Optional[float] = None
+    previous_value: Optional[float] = None
+    change_percentage: Optional[float] = None
+    problem_summary: str
+    likely_causes: List[Dict[str, Any]]
+    evidence: List[str]
+    validation_steps: List[str]
+    priority_action: str
+    confidence: float
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "analysis_results"
+        indexes = [
+            [("analysis_id", 1)],
+            [("campaign_id", 1)],
+            [("metric_name", 1)],
+            [("created_at", -1)],
+        ]
+
+
 class User(Document):
     username: Indexed(str, unique=True)  # type: ignore
     email: Indexed(str, unique=True)  # type: ignore

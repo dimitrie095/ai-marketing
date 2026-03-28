@@ -20,3 +20,13 @@
 
 - LLM Config braucht zuerst: POST /api/v1/llm/config/providers/initialize-defaults
 - MongoDB speichert Decimal als Decimal128, Beanie konvertiert nicht automatisch
+
+# Achtung!!
+
+- Löscht alle Datein die du erstellt um etwas zu testen nach erfolgreiche Implementierung.
+
+- Clean Code ist Pflicht
+
+- Bleibt Professionel und effizient
+
+- Wenn du etwas nicht weißt, benutzt web search tool

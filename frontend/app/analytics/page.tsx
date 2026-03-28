@@ -64,7 +64,8 @@ import {
   getCampaignPerformance, 
   getMetricsBreakdown,
   getRootCauseAnalysis,
-  getCampaigns
+  getCampaigns,
+  saveAnalysisResult
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -152,8 +153,9 @@ export default function AnalyticsPage() {
       setLoading(true);
       setError(null);
       
-      const startDate = dateRange.from.toISOString().split('T')[0];
-      const endDate = dateRange.to.toISOString().split('T')[0];
+      const startDate = format(dateRange.from, 'yyyy-MM-dd');
+      const endDate = format(dateRange.to, 'yyyy-MM-dd');
+      console.log('Fetching analytics data for date range:', dateRange, startDate, endDate);
       
       // Fetch all data in parallel
       const [summaryRes, trendsRes, campaignsRes, breakdownRes] = await Promise.all([
@@ -162,6 +164,15 @@ export default function AnalyticsPage() {
         getCampaignPerformance(startDate, endDate, 'roas', 10),
         getMetricsBreakdown(startDate, endDate, groupBy as any)
       ]);
+      
+      console.log('Analytics API responses:', {
+        summaryRes,
+        trendsRes,
+        campaignsRes,
+        breakdownRes,
+        startDate,
+        endDate
+      });
       
       if (summaryRes.status === 'success') {
         setSummary(summaryRes.summary);
@@ -241,18 +252,189 @@ export default function AnalyticsPage() {
     document.body.removeChild(a);
   };
 
+  // Formats LLM analysis text (numbered items, * bullets, --- separators) to clean HTML
+  const formatAnalysisText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/\s*-{3,}\.?\s*/g, '')                                          // remove --- separators
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')                         // **bold** → <strong>
+      .replace(/\s+(\d+\.\s)/g, '<br><br>$1')                                  // line break before numbered items
+      .replace(/\s*\*\s+([^*:<>]+):/g, '<br><strong>$1:</strong>')              // * Label: → <br><strong>Label:</strong>
+      .replace(/\s*\*\s+/g, '<br>')                                             // remaining * bullets → line break
+      .replace(/\*/g, '')                                                       // strip any leftover * characters
+      .trim();
+  };
+
+  // Format metric value based on metric type
+  const formatMetricValue = (value: number, metric: string): string => {
+    if (value === null || value === undefined) return 'N/A';
+    switch (metric) {
+      case 'roas':
+        return `${value.toFixed(2)}x`;
+      case 'cpc':
+      case 'spend':
+      case 'revenue':
+        return `€${value.toFixed(2)}`;
+      case 'ctr':
+      case 'cvr':
+        return `${value.toFixed(2)}%`;
+      default:
+        return value.toFixed(2);
+    }
+  };
+
+  // Transform root cause analysis result to enriched format
+  const transformRootCauseResult = (
+    data: any,
+    metric: string,
+    campaignId: string,
+    startDate: string,
+    endDate: string
+  ) => {
+    // Helper to derive confidence score from various formats
+    const getConfidenceScore = (conf: any): number => {
+      if (typeof conf === 'number') return conf;
+      if (typeof conf === 'string') {
+        if (conf.toLowerCase().includes('hoch') || conf.toLowerCase().includes('high')) return 0.9;
+        if (conf.toLowerCase().includes('mittel') || conf.toLowerCase().includes('medium')) return 0.6;
+        if (conf.toLowerCase().includes('niedrig') || conf.toLowerCase().includes('low')) return 0.3;
+      }
+      return 0.7; // default
+    };
+
+    // Helper to format bold text: **word** => <strong>word</strong>, strip leading markdown bullets
+    const formatBoldText = (text: string): string => {
+      if (!text) return '';
+      return text
+        .replace(/^\s*[\*\-]\s+/, '')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    };
+
+    // If data already has the old format (primary_cause), keep it but enrich
+    if (data.primary_cause) {
+      const confidenceScore = getConfidenceScore(data.confidence);
+      // Enrich analysis_details with more information if missing
+      let analysis_details = data.analysis_details || '';
+      if (!analysis_details && data.evidence) {
+        analysis_details = `Evidenz: ${data.evidence.join(', ')}. ${data.priority_action || ''}`;
+      }
+      // Format bold text in primary_cause and problem_summary
+      const formattedPrimaryCause = formatBoldText(data.primary_cause);
+      const formattedProblemSummary = formatAnalysisText(data.problem_summary || '');
+
+      return {
+        ...data,
+        // Ensure we have all required fields
+        primary_cause: data.primary_cause,
+        formatted_primary_cause: formattedPrimaryCause,
+        confidence: data.confidence || 'Mittel',
+        contributing_factors: data.contributing_factors || [],
+        recommended_actions: data.recommended_actions || [],
+        analysis_details: analysis_details,
+        formatted_analysis_details: formatAnalysisText(analysis_details),
+        // New fields
+        metric_name: metric,
+        campaign_id: campaignId,
+        period: `${startDate} - ${endDate}`,
+        confidence_score: confidenceScore,
+        // Backend fields preserved
+        backend_data: data,
+        // Additional enriched fields
+        problem_summary: data.problem_summary || '',
+        formatted_problem_summary: formattedProblemSummary,
+        likely_causes: data.likely_causes || [],
+        evidence: data.evidence || [],
+        validation_steps: data.validation_steps || [],
+        priority_action: data.priority_action || '',
+        // Quantitative metrics
+        current_value: data.current_value ?? null,
+        previous_value: data.previous_value ?? null,
+        change_percentage: data.change_percentage ?? null,
+        period_current: data.period_current ?? `${startDate} - ${endDate}`,
+        period_previous: data.period_previous ?? null,
+        // Confidence reasoning
+        confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${data.evidence?.length || data.contributing_factors?.length || 0} Evidenz-Punkten und ${data.likely_causes?.length || data.contributing_factors?.length || 0} identifizierten Ursachen.`
+      };
+    }
+    
+    // Transform backend format to frontend format
+    const likelyCauses = data.likely_causes || [];
+    const contributing_factors = likelyCauses
+      .map((cause: any) =>
+        typeof cause === 'string' ? cause : (cause.cause || cause.description || cause.factor || cause.reason || '')
+      )
+      .filter(Boolean);
+    // Fallback: use evidence items if no contributing factors found
+    const finalContributingFactors = contributing_factors.length > 0
+      ? contributing_factors
+      : (data.evidence?.length > 0 ? data.evidence : data.validation_steps || []);
+    const primary_cause = finalContributingFactors[0] || data.problem_summary || 'Unbekannt';
+    const confidenceScore = getConfidenceScore(data.confidence);
+    const confidence = data.confidence ? (data.confidence >= 0.8 ? 'Hoch' : data.confidence >= 0.5 ? 'Mittel' : 'Niedrig') : 'Mittel';
+    // Combine priority_action and validation_steps into recommended_actions
+    const recommended_actions = data.priority_action 
+      ? [data.priority_action, ...(data.validation_steps || [])]
+      : data.validation_steps || [];
+    // Build comprehensive analysis details
+    const evidenceText = data.evidence?.length ? `Evidenz: ${data.evidence.join('; ')}. ` : '';
+    const causesText = finalContributingFactors.length ? `Mögliche Ursachen: ${finalContributingFactors.join('; ')}. ` : '';
+    const validationText = data.validation_steps?.length ? `Validierungsschritte: ${data.validation_steps.join('; ')}. ` : '';
+    const analysis_details = `${evidenceText}${causesText}${validationText}${data.priority_action ? `Prioritätsaktion: ${data.priority_action}.` : ''}`;
+    
+    // Format text
+    const formattedPrimaryCause = formatBoldText(primary_cause);
+    const formattedProblemSummary = formatAnalysisText(data.problem_summary || '');
+    const formattedAnalysisDetails = formatAnalysisText(analysis_details);
+    
+    return {
+      // Old format (for compatibility)
+      primary_cause,
+      formatted_primary_cause: formattedPrimaryCause,
+      confidence,
+      contributing_factors: finalContributingFactors,
+      recommended_actions,
+      analysis_details,
+      formatted_analysis_details: formattedAnalysisDetails,
+      // New detailed fields
+      metric_name: metric,
+      campaign_id: campaignId,
+      period: `${startDate} - ${endDate}`,
+      backend_data: data,
+      // Additional analysis data
+      problem_summary: data.problem_summary || '',
+      formatted_problem_summary: formattedProblemSummary,
+      likely_causes: data.likely_causes || [],
+      evidence: data.evidence || [],
+      validation_steps: data.validation_steps || [],
+      priority_action: data.priority_action || '',
+      confidence_score: confidenceScore,
+      // Quantitative metrics
+      current_value: data.current_value ?? null,
+      previous_value: data.previous_value ?? null,
+      change_percentage: data.change_percentage ?? null,
+      period_current: data.period_current ?? `${startDate} - ${endDate}`,
+      period_previous: data.period_previous ?? null,
+      // Confidence reasoning
+      confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${data.evidence?.length || 0} Evidenz-Punkten und ${data.likely_causes?.length || 0} identifizierten Ursachen.`
+    };
+  };
+
+  // Alias – inline items use the same full formatter
+  const formatBoldTextInline = formatAnalysisText;
+
   const runRootCauseAnalysis = async () => {
     if (!selectedCampaign) {
       setError('Bitte wählen Sie eine Kampagne aus');
       return;
     }
     
+    // Compute dates outside try-catch for access in catch block
+    const startDate = format(dateRange.from, 'yyyy-MM-dd');
+    const endDate = format(dateRange.to, 'yyyy-MM-dd');
+    
     try {
       setAnalysisLoading(true);
       setError(null);
-      
-      const startDate = dateRange.from.toISOString().split('T')[0];
-      const endDate = dateRange.to.toISOString().split('T')[0];
       
       const response = await getRootCauseAnalysis(
         selectedCampaign,
@@ -263,42 +445,65 @@ export default function AnalyticsPage() {
       );
       
       if (response.success && response.data) {
-        setRootCauseResult(response.data);
+        const transformed = transformRootCauseResult(
+          response.data,
+          selectedMetricForAnalysis,
+          selectedCampaign,
+          startDate,
+          endDate
+        );
+        setRootCauseResult(transformed);
       } else {
         // Fallback: Generate demo analysis
-        setRootCauseResult({
-          primary_cause: 'Steigende CPC durch verstärkte Konkurrenz',
+        const demoData = {
+          primary_cause: 'Steigende CPC durch **verstärkte** Konkurrenz',
           confidence: 'Hoch',
           contributing_factors: [
-            'Erhöhte Auktionskonkurrenz in der Branche',
-            'Saisonale Effekte erhoehen die Nachfrage',
-            'Audience Fatigue bei bestehenden Creatives'
+            'Erhöhte **Auktionskonkurrenz** in der Branche',
+            'Saisonale Effekte erhoehen die **Nachfrage**',
+            '**Audience Fatigue** bei bestehenden Creatives'
           ],
           recommended_actions: [
-            'Testen Sie neue Creatives mit frischen Bildern',
-            'Erweitern Sie das Targeting auf ähnliche Audiences',
-            'Reduzieren Sie das Budget temporär um 15%',
-            'Testen Sie neue Placements (Instagram Reels)'
+            'Testen Sie neue Creatives mit **frischen Bildern**',
+            'Erweitern Sie das Targeting auf **ähnliche Audiences**',
+            'Reduzieren Sie das Budget temporär um **15%**',
+            'Testen Sie neue Placements (**Instagram Reels**)'
           ],
-          analysis_details: 'Die Analyse zeigt einen signifikanten Anstieg der Kosten pro Klick um 23% im Vergleich zur Vorwoche.'
-        });
+          analysis_details: 'Die Analyse zeigt einen **signifikanten** Anstieg der Kosten pro Klick um **23%** im Vergleich zur Vorwoche.'
+        };
+        const transformed = transformRootCauseResult(
+          demoData,
+          selectedMetricForAnalysis,
+          selectedCampaign,
+          startDate,
+          endDate
+        );
+        setRootCauseResult(transformed);
       }
     } catch (err) {
       console.error('Root cause analysis error:', err);
       // Show demo data even on error
-      setRootCauseResult({
-        primary_cause: 'Steigende CPC durch verstärkte Konkurrenz',
+      const demoData = {
+        primary_cause: 'Steigende CPC durch **verstärkte** Konkurrenz',
         confidence: 'Hoch',
         contributing_factors: [
-          'Erhöhte Auktionskonkurrenz in der Branche',
-          'Audience Fatigue bei bestehenden Creatives'
+          'Erhöhte **Auktionskonkurrenz** in der Branche',
+          '**Audience Fatigue** bei bestehenden Creatives'
         ],
         recommended_actions: [
-          'Testen Sie neue Creatives mit frischen Bildern',
-          'Erweitern Sie das Targeting auf ähnliche Audiences'
+          'Testen Sie neue Creatives mit **frischen Bildern**',
+          'Erweitern Sie das Targeting auf **ähnliche Audiences**'
         ],
-        analysis_details: 'Demo-Analyse: Die Kosten pro Klick sind gestiegen.'
-      });
+        analysis_details: 'Demo-Analyse: Die Kosten pro Klick sind **gestiegen**.'
+      };
+      const transformed = transformRootCauseResult(
+        demoData,
+        selectedMetricForAnalysis,
+        selectedCampaign,
+        startDate,
+        endDate
+      );
+      setRootCauseResult(transformed);
     } finally {
       setAnalysisLoading(false);
     }
@@ -1055,50 +1260,281 @@ export default function AnalyticsPage() {
 
                 {rootCauseResult && (
                   <div className="space-y-6">
-                    {/* Primary Cause */}
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                      <h4 className="font-semibold text-red-800 mb-2">Hauptursache</h4>
-                      <p className="text-red-700">{rootCauseResult.primary_cause}</p>
-                      <Badge variant="outline" className="mt-2">
-                        Konfidenz: {rootCauseResult.confidence}
-                      </Badge>
+                    {/* Analysis Overview */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground">Analyse Metrik</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center gap-2">
+                            <Activity className="h-5 w-5 text-blue-500" />
+                            <span className="text-lg font-semibold">{rootCauseResult.metric_name?.toUpperCase() || selectedMetricForAnalysis.toUpperCase()}</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Kampagne: {rootCauseResult.campaign_id}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground">Zeitraum</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center gap-2">
+                            <CalendarIcon className="h-5 w-5 text-green-500" />
+                            <span className="text-lg font-semibold">{rootCauseResult.period || `${format(dateRange.from, 'dd.MM.yyyy')} - ${format(dateRange.to, 'dd.MM.yyyy')}`}</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Vergleich: Vorherige 7 Tage</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground">Konfidenz</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center gap-2">
+                            <Target className="h-5 w-5 text-purple-500" />
+                            <span className="text-lg font-semibold">{rootCauseResult.confidence}</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Score: {(rootCauseResult.confidence_score * 100)?.toFixed(0) || 'N/A'}%
+                          </p>
+                        </CardContent>
+                      </Card>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      {/* Contributing Factors */}
-                      <div>
-                        <h4 className="font-semibold mb-3">Beteiligte Faktoren</h4>
-                        <ul className="space-y-2">
-                          {rootCauseResult.contributing_factors?.map((factor: string, index: number) => (
-                            <li key={index} className="flex items-start gap-2">
-                              <ArrowRightLeft className="h-4 w-4 text-muted-foreground mt-0.5" />
-                              <span className="text-sm">{factor}</span>
-                            </li>
-                          ))}
-                        </ul>
+                    {/* Quantitative Metrics */}
+                    {(rootCauseResult.current_value !== null || rootCauseResult.previous_value !== null) && (
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Aktueller Wert</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="flex items-center gap-2">
+                              <TrendingUp className="h-5 w-5 text-blue-500" />
+                              <span className="text-lg font-semibold">
+                                {rootCauseResult.current_value !== null ? formatMetricValue(rootCauseResult.current_value, selectedMetricForAnalysis) : 'N/A'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">Zeitraum: {rootCauseResult.period_current || rootCauseResult.period}</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Vorheriger Wert</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="flex items-center gap-2">
+                              <TrendingDown className="h-5 w-5 text-green-500" />
+                              <span className="text-lg font-semibold">
+                                {rootCauseResult.previous_value !== null ? formatMetricValue(rootCauseResult.previous_value, selectedMetricForAnalysis) : 'N/A'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">Zeitraum: {rootCauseResult.period_previous || 'Vorherige Periode'}</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-medium text-muted-foreground">Veränderung</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="flex items-center gap-2">
+                              {rootCauseResult.change_percentage !== null && rootCauseResult.change_percentage >= 0 ? (
+                                <TrendingUp className="h-5 w-5 text-red-500" />
+                              ) : (
+                                <TrendingDown className="h-5 w-5 text-green-500" />
+                              )}
+                              <span className={`text-lg font-semibold ${rootCauseResult.change_percentage !== null && rootCauseResult.change_percentage >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {rootCauseResult.change_percentage !== null ? `${rootCauseResult.change_percentage.toFixed(1)}%` : 'N/A'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">Vs. vorherige Periode</p>
+                          </CardContent>
+                        </Card>
                       </div>
+                    )}
 
-                      {/* Recommended Actions */}
-                      <div>
-                        <h4 className="font-semibold mb-3">Empfohlene Aktionen</h4>
-                        <ul className="space-y-2">
-                          {rootCauseResult.recommended_actions?.map((action: string, index: number) => (
-                            <li key={index} className="flex items-start gap-2">
-                              <Zap className="h-4 w-4 text-yellow-500 mt-0.5" />
-                              <span className="text-sm">{action}</span>
-                            </li>
-                          ))}
-                        </ul>
+                    {/* Primary Cause & Problem Summary */}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <h4 className="font-semibold text-red-800 mb-2 flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5" />
+                          Hauptursache
+                        </h4>
+                        <div 
+                          className="text-red-700"
+                          dangerouslySetInnerHTML={{ __html: rootCauseResult.formatted_primary_cause || rootCauseResult.primary_cause }}
+                        />
+                        <Badge variant="outline" className="mt-2">
+                          Konfidenz: {rootCauseResult.confidence}
+                        </Badge>
+                        {rootCauseResult.confidence_reasoning && (
+                          <p className="text-xs text-red-600 mt-2">{rootCauseResult.confidence_reasoning}</p>
+                        )}
                       </div>
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <h4 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                          <Lightbulb className="h-5 w-5" />
+                          Problemzusammenfassung
+                        </h4>
+                        <div
+                          className="text-blue-700"
+                          dangerouslySetInnerHTML={{ __html: rootCauseResult.formatted_problem_summary || rootCauseResult.formatted_analysis_details || formatAnalysisText(rootCauseResult.problem_summary || rootCauseResult.analysis_details || '') }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Detailed Analysis Sections */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      {/* Contributing Factors */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-sm">
+                            <ArrowRightLeft className="h-4 w-4" />
+                            Beteiligte Faktoren
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="space-y-2">
+                            {rootCauseResult.contributing_factors?.length > 0 ? (
+                              rootCauseResult.contributing_factors.map((factor: string, index: number) => (
+                                <li key={index} className="flex items-start gap-2">
+                                  <div className="h-2 w-2 rounded-full bg-blue-500 mt-2 flex-shrink-0"></div>
+                                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: formatBoldTextInline(factor) }} />
+                                </li>
+                              ))
+                            ) : (
+                              <li className="text-sm text-muted-foreground italic">Keine spezifischen Faktoren identifiziert. Bitte Zeitraum oder Kampagne anpassen.</li>
+                            )}
+                          </ul>
+                        </CardContent>
+                      </Card>
+
+                      {/* Evidence */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-sm">
+                            <Search className="h-4 w-4" />
+                            Beweise
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="space-y-2">
+                            {rootCauseResult.evidence?.map((evidence: string, index: number) => (
+                              <li key={index} className="flex items-start gap-2">
+                                <div className="h-2 w-2 rounded-full bg-green-500 mt-2"></div>
+                                <div className="text-sm" dangerouslySetInnerHTML={{ __html: formatBoldTextInline(evidence) }} />
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+
+                      {/* Validation Steps */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-sm">
+                            <Brain className="h-4 w-4" />
+                            Validierungsschritte
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="space-y-2">
+                            {rootCauseResult.validation_steps?.map((step: string, index: number) => (
+                              <li key={index} className="flex items-start gap-2">
+                                <div className="h-2 w-2 rounded-full bg-yellow-500 mt-2"></div>
+                                <div className="text-sm" dangerouslySetInnerHTML={{ __html: formatBoldTextInline(step) }} />
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Priority Action & Recommended Actions */}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Zap className="h-5 w-5 text-yellow-500" />
+                            Prioritätsaktion
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div 
+                            className="text-sm"
+                            dangerouslySetInnerHTML={{ __html: formatBoldTextInline(rootCauseResult.priority_action || rootCauseResult.recommended_actions?.[0] || 'Keine spezifische Aktion definiert.') }}
+                          />
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Zap className="h-5 w-5 text-yellow-500" />
+                            Empfohlene Aktionen
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="space-y-2">
+                            {rootCauseResult.recommended_actions?.map((action: string, index: number) => (
+                              <li key={index} className="flex items-start gap-2">
+                                <Zap className="h-4 w-4 text-yellow-500 mt-0.5" />
+                                <div className="text-sm" dangerouslySetInnerHTML={{ __html: formatBoldTextInline(action) }} />
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
                     </div>
 
                     {/* Analysis Details */}
-                    {rootCauseResult.analysis_details && (
-                      <div className="p-4 bg-muted rounded-lg">
-                        <h4 className="font-semibold mb-2">Analyse Details</h4>
-                        <p className="text-sm text-muted-foreground">{rootCauseResult.analysis_details}</p>
-                      </div>
+                    {(rootCauseResult.analysis_details || rootCauseResult.formatted_analysis_details) && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Analyse Details</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div
+                            className="text-sm text-muted-foreground"
+                            dangerouslySetInnerHTML={{ __html: rootCauseResult.formatted_analysis_details || formatAnalysisText(rootCauseResult.analysis_details || '') }}
+                          />
+                        </CardContent>
+                      </Card>
                     )}
+
+                    {/* Methodology & Data Sources */}
+                    <Card className="bg-muted">
+                      <CardHeader>
+                        <CardTitle className="text-sm font-medium">Methodik & Datenquellen</CardTitle>
+                      </CardHeader>
+                      <CardContent className="text-sm text-muted-foreground">
+                        <p>Diese Analyse verwendet LLM-basierte Ursachenanalyse, die auf historischen Performance-Daten und Korrelationsmustern basiert. Die Daten stammen aus der MongoDB-Metriken-Sammlung für die ausgewählte Kampagne und den angegebenen Zeitraum.</p>
+                        
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          <div>
+                            <h5 className="font-medium">Analyse-Details</h5>
+                            <ul className="text-xs space-y-1 mt-1">
+                              <li><strong>Metrik:</strong> {rootCauseResult.metric_name?.toUpperCase() || selectedMetricForAnalysis.toUpperCase()}</li>
+                              <li><strong>Zeitraum:</strong> {rootCauseResult.period || `${format(dateRange.from, 'dd.MM.yyyy')} - ${format(dateRange.to, 'dd.MM.yyyy')}`}</li>
+                              <li><strong>Vergleich:</strong> Vorherige 7 Tage</li>
+                              <li><strong>Evidenzpunkte:</strong> {rootCauseResult.evidence?.length || 0}</li>
+                              <li><strong>Identifizierte Ursachen:</strong> {rootCauseResult.contributing_factors?.length || rootCauseResult.likely_causes?.length || 0}</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <h5 className="font-medium">Transparenz</h5>
+                            <ul className="text-xs space-y-1 mt-1">
+                              <li>Alle analysierten Daten sind in der Datenbank nachvollziehbar.</li>
+                              <li>Die LLM-Analyse basiert auf einem strukturierten Prompt-Template.</li>
+                              <li>Konfidenz-Score: {(rootCauseResult.confidence_score * 100)?.toFixed(0) || 'N/A'}%</li>
+                              <li>Empfehlungen priorisiert nach Wirkung und Aufwand.</li>
+                            </ul>
+                          </div>
+                        </div>
+                        
+                        <p className="mt-4 text-xs">Die Konfidenz spiegelt die Stärke der Evidenz und die Konsistenz der Muster wider. Diese Analyse ist keine Black Box – alle Erkenntnisse und Entscheidungen sind nachvollziehbar.</p>
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
 

@@ -43,6 +43,12 @@ class RootCauseResult(BaseModel):
     validation_steps: List[str]
     priority_action: str
     confidence: float  # 0-1
+    metric_name: Optional[str] = None
+    current_value: Optional[float] = None
+    previous_value: Optional[float] = None
+    change_percentage: Optional[float] = None
+    period_current: Optional[str] = None
+    period_previous: Optional[str] = None
     
     class Config:
         json_encoders = {
@@ -447,6 +453,25 @@ class RootCauseAnalysisAgent:
             # Parse response
             analysis_text = response.choices[0]["message"]["content"]
             result = self._parse_root_cause_response(analysis_text)
+            
+            # Add quantitative metrics
+            result_dict = result.dict()
+            # Ensure numeric values are float
+            current_val = drop_data.get(metric_name)
+            previous_val = comp_data.get(metric_name)
+            change_pct = None
+            if previous_val and previous_val != 0:
+                change_pct = ((current_val - previous_val) / previous_val) * 100
+            
+            result_dict.update({
+                "metric_name": metric_name,
+                "current_value": float(current_val) if current_val is not None else None,
+                "previous_value": float(previous_val) if previous_val is not None else None,
+                "change_percentage": float(change_pct) if change_pct is not None else None,
+                "period_current": f"{start_date_drop} to {end_date_drop}",
+                "period_previous": f"{start_comparison} to {start_date_drop}",
+            })
+            result = RootCauseResult(**result_dict)
             
             logger.info(f"✅ Root cause analysis completed for {campaign_id}")
             

@@ -15,6 +15,7 @@ try:
     from app.services.kpi_service import KPIService
     from app.db.models import Metric, Campaign, AdSet, Ad
     from app.processing.kpi_engine import KPIEngine
+    from app.services.data_seeder import seed_all_campaigns, has_metrics
     from beanie import PydanticObjectId
     DB_AVAILABLE = True
 except ImportError as e:
@@ -23,6 +24,9 @@ except ImportError as e:
     print(f"DB import error: {e}")
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+# Debug DB availability
+print(f"[DEBUG] DB_AVAILABLE = {DB_AVAILABLE}")
 
 
 def generate_date_range(start_date: date, end_date: date) -> List[date]:
@@ -70,6 +74,31 @@ def generate_mock_trend_data(start_date: date, end_date: date, metric: str) -> L
         })
     
     return data
+
+
+def generate_mock_campaigns(limit: int = 10, sort_by: str = "roas"):
+    """Generate realistic mock campaign performance data"""
+    mock_campaigns = [
+        {
+            "id": f"camp_{i}",
+            "name": f"Kampagne {i+1}",
+            "status": "ACTIVE" if i % 2 == 0 else "PAUSED",
+            "spend": round(random.uniform(500, 3000), 2),
+            "revenue": round(random.uniform(1500, 12000), 2),
+            "impressions": random.randint(10000, 100000),
+            "clicks": random.randint(200, 3000),
+            "conversions": random.randint(10, 300),
+            "ctr": round(random.uniform(1.5, 5.0), 2),
+            "cpc": round(random.uniform(0.5, 2.0), 2),
+            "roas": round(random.uniform(1.2, 5.5), 2),
+            "cvr": round(random.uniform(2.0, 8.0), 2)
+        }
+        for i in range(limit)
+    ]
+    
+    # Sort mock data
+    mock_campaigns.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+    return mock_campaigns
 
 
 async def get_metrics_from_db(
@@ -978,6 +1007,12 @@ async def get_period_comparison(
     
     if DB_AVAILABLE:
         try:
+            # Auto-seed if no recent metrics exist
+            if not await has_metrics(days=90):
+                import logging
+                logging.info("No metrics found — auto-seeding demo data")
+                await seed_all_campaigns(days=180)
+
             # Hole Metriken für beide Zeiträume
             current_metrics = await get_metrics_from_db(start_date, end_date, campaign_ids)
             compare_metrics = await get_metrics_from_db(compare_start, compare_end, campaign_ids)
@@ -1077,6 +1112,47 @@ async def get_period_comparison(
         ],
         "group_by": group_by
     }
+
+@router.post("/analysis-results", response_model=Dict[str, Any])
+async def save_analysis_result(
+    analysis_data: Dict[str, Any],
+    db=Depends(get_db)
+):
+    """
+    Save root cause analysis result to database
+    """
+    try:
+        # Generate unique analysis ID
+        from datetime import datetime
+        analysis_id = f"analysis_{datetime.utcnow().timestamp()}_{hash(str(analysis_data))[:8]}"
+        
+        # Create AnalysisResult document
+        from app.db.models import AnalysisResult
+        doc = AnalysisResult(
+            analysis_id=analysis_id,
+            campaign_id=analysis_data.get("campaign_id"),
+            metric_name=analysis_data.get("metric_name"),
+            period_current=analysis_data.get("period_current"),
+            period_previous=analysis_data.get("period_previous"),
+            current_value=analysis_data.get("current_value"),
+            previous_value=analysis_data.get("previous_value"),
+            change_percentage=analysis_data.get("change_percentage"),
+            problem_summary=analysis_data.get("problem_summary"),
+            likely_causes=analysis_data.get("likely_causes", []),
+            evidence=analysis_data.get("evidence", []),
+            validation_steps=analysis_data.get("validation_steps", []),
+            priority_action=analysis_data.get("priority_action"),
+            confidence=analysis_data.get("confidence", 0.5),
+        )
+        await doc.insert()
+        
+        return {"status": "success", "data": {"analysis_id": analysis_id}}
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to save analysis result: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save analysis result: {str(e)}")
 
 
 def calculate_period_changes(current: dict, compare: dict) -> dict:

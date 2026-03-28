@@ -11,6 +11,7 @@ from datetime import date, datetime
 try:
     from app.db.session import get_db
     from app.services.kpi_service import KPIService
+    from app.services.data_seeder import seed_all_campaigns, has_metrics
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
@@ -304,7 +305,13 @@ async def get_dashboard_summary(
         from app.db.models import Campaign
         campaigns = await Campaign.find().to_list()
         campaign_ids = [str(c.id) for c in campaigns]
-        
+
+        # Auto-seed if we have campaigns but no recent metrics
+        if campaign_ids and not await has_metrics(days=90):
+            import logging
+            logging.info("No metrics found — auto-seeding demo data for existing campaigns")
+            await seed_all_campaigns(days=180)
+
         if not campaign_ids:
             # Return default data structure when no campaigns exist
             return {

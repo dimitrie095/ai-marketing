@@ -11,16 +11,19 @@ import {
   SpendCard, 
   RevenueCard 
 } from "@/components/dashboard/kpi-card";
-import { getDashboardSummary } from "@/lib/api";
-import { 
-  BarChart3, 
-  TrendingUp, 
-  DollarSign, 
+import { getDashboardSummary, seedDemoMetrics } from "@/lib/api";
+import {
+  BarChart3,
+  TrendingUp,
+  DollarSign,
   ShoppingCart,
   MousePointerClick,
   Users,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  Database
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -56,10 +59,23 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleSeedData = async () => {
+    try {
+      setSeeding(true);
+      await seedDemoMetrics(90);
+      await loadData();
+    } catch (err) {
+      console.error("Seeding failed:", err);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -126,6 +142,23 @@ export default function DashboardPage() {
             <p className="text-muted-foreground">
               Übersicht über Ihre Marketing-Kampagnen
             </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {safeSpend === 0 && !loading && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSeedData}
+                disabled={seeding}
+              >
+                {seeding ? (
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Database className="mr-2 h-4 w-4" />
+                )}
+                {seeding ? "Generiere Daten..." : "Demo-Daten generieren"}
+              </Button>
+            )}
           </div>
         </div>
 

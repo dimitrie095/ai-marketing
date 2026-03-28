@@ -69,4 +69,10 @@ try:
 except ImportError:
     pass
 
+try:
+    from .admin import router as admin_router
+    api_router.include_router(admin_router, tags=["Admin"])
+except ImportError:
+    pass
+
 __all__ = ["api_router"]
