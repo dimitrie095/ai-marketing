@@ -61,12 +61,14 @@ import {
   Plus,
   Brain,
   AlertCircle,
+  AlertTriangle,
   RefreshCw,
   Eye,
   CheckCircle,
   XCircle,
   ChevronRight,
   ChevronDown,
+  MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -205,6 +207,11 @@ export default function CampaignDetailPage() {
   const [isCreateAdSetDialogOpen, setIsCreateAdSetDialogOpen] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [newBudget, setNewBudget] = useState<number>(0);
+  const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
+  const [isDuplicateConfirmOpen, setIsDuplicateConfirmOpen] = useState(false);
+  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [adSetAction, setAdSetAction] = useState<{ id: string; name: string; type: 'pause' | 'delete' } | null>(null);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   
   // Form states
@@ -841,10 +848,36 @@ export default function CampaignDetailPage() {
     try {
       const response = await updateCampaign(campaignId, { status: newStatus });
       if (response.status === "success") {
+        setIsStatusConfirmOpen(false);
         loadCampaignData();
       }
     } catch (err) {
       setError("Fehler beim Status-Wechsel");
+    }
+  };
+
+  const handleDuplicate = () => {
+    setIsDuplicateConfirmOpen(false);
+    // Placeholder – real implementation would call a duplicate API
+  };
+
+  const handleSaveNote = () => {
+    setIsNoteDialogOpen(false);
+    setNoteText('');
+  };
+
+  const handleAdSetAction = async () => {
+    if (!adSetAction) return;
+    try {
+      if (adSetAction.type === 'delete') {
+        // Placeholder – real: await deleteAdSet(adSetAction.id)
+      } else {
+        // Placeholder – real: await updateAdSet(adSetAction.id, { status: ... })
+      }
+      setAdSetAction(null);
+      loadCampaignData();
+    } catch (err) {
+      setError('Fehler bei der AdSet-Aktion');
     }
   };
 
@@ -1040,8 +1073,9 @@ export default function CampaignDetailPage() {
           
           <div className="flex items-center gap-2">
             <Button
-              variant={campaign.status === "ACTIVE" ? "destructive" : "default"}
-              onClick={handleStatusToggle}
+              variant={campaign.status === "ACTIVE" ? "outline" : "default"}
+              className={campaign.status === "ACTIVE" ? "border-amber-400 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950" : "bg-green-600 hover:bg-green-700 text-white"}
+              onClick={() => setIsStatusConfirmOpen(true)}
             >
               {campaign.status === "ACTIVE" ? (
                 <><Pause className="mr-2 h-4 w-4" /> Pausieren</>
@@ -1593,9 +1627,21 @@ export default function CampaignDetailPage() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem>Bearbeiten</DropdownMenuItem>
-                                  <DropdownMenuItem>Pausieren</DropdownMenuItem>
-                                  <DropdownMenuItem className="text-red-600">Löschen</DropdownMenuItem>
+                                  <DropdownMenuItem disabled>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Bearbeiten
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => setAdSetAction({ id: adSet.id, name: adSet.name, type: 'pause' })}>
+                                    <Pause className="mr-2 h-4 w-4" />
+                                    {adSet.status === 'ACTIVE' ? 'Pausieren' : 'Aktivieren'}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className="text-red-600 focus:text-red-600"
+                                    onClick={() => setAdSetAction({ id: adSet.id, name: adSet.name, type: 'delete' })}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Löschen
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>
@@ -1958,18 +2004,15 @@ export default function CampaignDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <Button variant="outline" onClick={() => alert('Budgetänderung wird geöffnet (in einer echten App würde ein Modal erscheinen).')}>
+                  <Button variant="outline" onClick={() => setIsBudgetDialogOpen(true)}>
                     <DollarSign className="mr-2 h-4 w-4" />
                     Budget ändern
                   </Button>
-                  <Button variant="outline" onClick={() => {
-                    const note = prompt('Notiz hinzufügen:', '');
-                    if (note) alert(`Notiz hinzugefügt: ${note}`);
-                  }}>
-                    <Edit className="mr-2 h-4 w-4" />
+                  <Button variant="outline" onClick={() => setIsNoteDialogOpen(true)}>
+                    <MessageSquare className="mr-2 h-4 w-4" />
                     Notiz hinzufügen
                   </Button>
-                  <Button variant="outline" onClick={() => alert('Kampagne wird dupliziert...')}>
+                  <Button variant="outline" onClick={() => setIsDuplicateConfirmOpen(true)}>
                     <Copy className="mr-2 h-4 w-4" />
                     Duplizieren
                   </Button>
@@ -2068,18 +2111,27 @@ export default function CampaignDetailPage() {
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Kampagne löschen</DialogTitle>
-              <DialogDescription>
-                Sind Sie sicher, dass Sie diese Kampagne löschen möchten? 
-                Diese Aktion kann nicht rückgängig gemacht werden.
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900">
+                  <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+                </div>
+                <DialogTitle className="text-red-600 dark:text-red-400">Kampagne löschen</DialogTitle>
+              </div>
+              <DialogDescription className="pt-1">
+                Diese Aktion kann <strong>nicht rückgängig</strong> gemacht werden. Die Kampagne{' '}
+                <strong className="text-foreground">{campaign?.name}</strong> und alle zugehörigen Daten werden dauerhaft gelöscht.
               </DialogDescription>
             </DialogHeader>
+            <div className="rounded-md bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              ⚠ AdSets, Ads und alle Metriken dieser Kampagne werden ebenfalls gelöscht.
+            </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
                 Abbrechen
               </Button>
               <Button variant="destructive" onClick={handleDelete}>
-                Löschen
+                <Trash2 className="mr-2 h-4 w-4" />
+                Endgültig löschen
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -2217,6 +2269,183 @@ export default function CampaignDetailPage() {
               </Button>
               <Button onClick={handleCreateAdSet}>
                 Erstellen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Status Confirm Dialog (Pausieren / Aktivieren) */}
+        <Dialog open={isStatusConfirmOpen} onOpenChange={setIsStatusConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              {campaign?.status === "ACTIVE" ? (
+                <>
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900">
+                      <Pause className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <DialogTitle className="text-amber-600 dark:text-amber-400">Kampagne pausieren?</DialogTitle>
+                  </div>
+                  <DialogDescription>
+                    Die Kampagne <strong className="text-foreground">{campaign?.name}</strong> wird pausiert.
+                    Alle laufenden Ads werden gestoppt. Sie können die Kampagne jederzeit wieder aktivieren.
+                  </DialogDescription>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
+                      <Play className="h-5 w-5 text-green-600 dark:text-green-400" />
+                    </div>
+                    <DialogTitle className="text-green-600 dark:text-green-400">Kampagne aktivieren?</DialogTitle>
+                  </div>
+                  <DialogDescription>
+                    Die Kampagne <strong className="text-foreground">{campaign?.name}</strong> wird aktiviert.
+                    Alle zugehörigen Ads werden gestartet und das Budget beginnt zu laufen.
+                  </DialogDescription>
+                </>
+              )}
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsStatusConfirmOpen(false)}>
+                Abbrechen
+              </Button>
+              {campaign?.status === "ACTIVE" ? (
+                <Button
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={handleStatusToggle}
+                >
+                  <Pause className="mr-2 h-4 w-4" />
+                  Pausieren
+                </Button>
+              ) : (
+                <Button
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  onClick={handleStatusToggle}
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  Aktivieren
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Duplicate Confirm Dialog */}
+        <Dialog open={isDuplicateConfirmOpen} onOpenChange={setIsDuplicateConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
+                  <Copy className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <DialogTitle>Kampagne duplizieren?</DialogTitle>
+              </div>
+              <DialogDescription>
+                Eine Kopie der Kampagne <strong className="text-foreground">{campaign?.name}</strong> wird erstellt,
+                inklusive aller AdSets und Einstellungen. Die neue Kampagne wird im Status <strong>Pausiert</strong> erstellt.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDuplicateConfirmOpen(false)}>
+                Abbrechen
+              </Button>
+              <Button onClick={handleDuplicate}>
+                <Copy className="mr-2 h-4 w-4" />
+                Duplizieren
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Note Dialog */}
+        <Dialog open={isNoteDialogOpen} onOpenChange={setIsNoteDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                  <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <DialogTitle>Notiz hinzufügen</DialogTitle>
+              </div>
+              <DialogDescription>
+                Fügen Sie eine Notiz zu dieser Kampagne hinzu.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <textarea
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                rows={4}
+                placeholder="Notiz eingeben..."
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setIsNoteDialogOpen(false); setNoteText(''); }}>
+                Abbrechen
+              </Button>
+              <Button onClick={handleSaveNote} disabled={!noteText.trim()}>
+                Speichern
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* AdSet Action Dialogs (Pausieren / Löschen) */}
+        <Dialog open={adSetAction?.type === 'pause'} onOpenChange={(open) => !open && setAdSetAction(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <DialogTitle className="text-amber-600 dark:text-amber-400">AdSet pausieren?</DialogTitle>
+              </div>
+              <DialogDescription>
+                Das AdSet <strong className="text-foreground">{adSetAction?.name}</strong> wird pausiert.
+                Alle zugehörigen Ads werden gestoppt.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAdSetAction(null)}>
+                Abbrechen
+              </Button>
+              <Button
+                className="bg-amber-500 hover:bg-amber-600 text-white"
+                onClick={handleAdSetAction}
+              >
+                <Pause className="mr-2 h-4 w-4" />
+                Pausieren
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={adSetAction?.type === 'delete'} onOpenChange={(open) => !open && setAdSetAction(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900">
+                  <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+                </div>
+                <DialogTitle className="text-red-600 dark:text-red-400">AdSet löschen?</DialogTitle>
+              </div>
+              <DialogDescription>
+                Das AdSet <strong className="text-foreground">{adSetAction?.name}</strong> und alle zugehörigen Ads
+                werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              ⚠ Alle Ads und Metriken dieses AdSets werden ebenfalls gelöscht.
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAdSetAction(null)}>
+                Abbrechen
+              </Button>
+              <Button variant="destructive" onClick={handleAdSetAction}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Endgültig löschen
               </Button>
             </DialogFooter>
           </DialogContent>
