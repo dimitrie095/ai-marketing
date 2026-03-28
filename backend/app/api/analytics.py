@@ -364,7 +364,15 @@ async def get_campaigns_performance(
                             "id": campaign.id,
                             "name": campaign.name,
                             "status": campaign.status,
-                            **summary
+                            "spend": summary["total_spend"],
+                            "revenue": summary["total_revenue"],
+                            "impressions": summary["total_impressions"],
+                            "clicks": summary["total_clicks"],
+                            "conversions": summary["total_conversions"],
+                            "ctr": summary["avg_ctr"],
+                            "cpc": summary["avg_cpc"],
+                            "roas": summary["avg_roas"],
+                            "cvr": summary["avg_cvr"]
                         })
                 
                 # Sort by specified metric
@@ -395,6 +403,7 @@ async def get_campaigns_performance(
             "clicks": random.randint(200, 3000),
             "conversions": random.randint(10, 300),
             "ctr": round(random.uniform(1.5, 5.0), 2),
+            "cpc": round(random.uniform(0.5, 2.0), 2),
             "roas": round(random.uniform(1.2, 5.5), 2),
             "cvr": round(random.uniform(2.0, 8.0), 2)
         }
