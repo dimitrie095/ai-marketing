@@ -267,16 +267,16 @@ async def initialize_llm_gateway(db=Depends(get_db)):
         Initialisierungs-Status
     """
     try:
-        # Lade Konfigurationen
-        configs = config_manager.load_configs_from_env()
-        
+        # Lade Konfigurationen aus DB
+        configs = await config_manager.load_configs_from_db()
+
         if not configs:
             return {
                 "status": "warning",
-                "message": "Keine LLM Provider in Umgebung konfiguriert",
-                "configured_providers": ["openai", "kimi", "deepseek"]
+                "message": "Keine aktiven LLM Konfigurationen in der Datenbank gefunden",
+                "hint": "Bitte eine Konfiguration in den Einstellungen aktivieren"
             }
-        
+
         # Initialisiere Gateway
         result = await llm_gateway.initialize(configs)
         

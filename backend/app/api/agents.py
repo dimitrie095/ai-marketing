@@ -39,8 +39,8 @@ class KPIAnalysisResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     analysis_id: Optional[str] = None
-    provider_used: Optional[str] = None
-    tokens_used: Optional[Dict[str, int]] = None
+    provider_used: Optional[Dict[str, Any]] = None
+    tokens_used: Optional[Dict[str, Any]] = None
 
 
 class RootCauseRequest(BaseModel):
@@ -58,8 +58,8 @@ class RootCauseResponse(BaseModel):
     data: Optional[RootCauseResult] = None
     error: Optional[str] = None
     analysis_id: Optional[str] = None
-    provider_used: Optional[str] = None
-    tokens_used: Optional[Dict[str, int]] = None
+    provider_used: Optional[Dict[str, Any]] = None
+    tokens_used: Optional[Dict[str, Any]] = None
 
 
 class BatchAnalysisRequest(BaseModel):

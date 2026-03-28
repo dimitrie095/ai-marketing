@@ -85,15 +85,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️ Database module not available. Skipping DB connection test.")
 
-    # Initialize LLM Gateway
+    # Initialize LLM Gateway from DB only
     if llm_available:
         try:
-            configs = config_manager.load_configs_from_env()
+            configs = await config_manager.load_configs_from_db()
             if configs:
                 result = await llm_gateway.initialize(configs)
                 logger.info(f"✅ LLM Gateway initialized: {result}")
             else:
-                logger.warning("⚠️ No LLM providers configured in environment")
+                logger.warning("⚠️ No active LLM config found in DB — gateway not initialized")
         except Exception as e:
             logger.error(f"❌ LLM Gateway initialization failed: {e}")
             logger.warning("Continuing without LLM support...")

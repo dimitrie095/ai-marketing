@@ -68,11 +68,16 @@ class LLMGateway:
             Initialisierungs-Status
         """
         logger.info("🚀 Initialisiere LLM Gateway...")
-        
+
+        # Vorherige Provider-Instanzen zurücksetzen
+        self.providers = {}
+        self.priority_order = []
+        self.token_usage = {}
+
         if not configs:
             logger.warning("⚠️  Keine Provider-Konfigurationen gefunden")
             return {"status": "warning", "message": "Keine Provider konfiguriert"}
-        
+
         # Provider initialisieren
         initialized = 0
         errors = []
@@ -260,7 +265,7 @@ class LLMGateway:
                 "requests": total_requests
             },
             "by_provider": {
-                provider.value: stats
+                provider: stats
                 for provider, stats in self.token_usage.items()
             }
         }
@@ -271,7 +276,7 @@ class LLMGateway:
         
         for provider, provider_instance in self.providers.items():
             info = {
-                "provider": provider.value,
+                "provider": provider,
                 "model": provider_instance.config.model,
                 "is_active": provider_instance.config.is_active,
                 "is_default": provider_instance.config.is_default,
@@ -288,9 +293,9 @@ class LLMGateway:
         for provider in priority_order:
             if provider not in self.providers:
                 raise ValueError(f"Provider {provider} ist nicht initialisiert")
-        
+
         self.priority_order = priority_order
-        logger.info(f"📋 Provider-Priorität geändert: {[p.value for p in priority_order]}")
+        logger.info(f"📋 Provider-Priorität geändert: {priority_order}")
 
 
 # Globaler Gateway-Instance

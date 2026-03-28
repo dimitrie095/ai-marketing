@@ -2,80 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/dashboard/layout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Alert,
-  AlertDescription,
-} from "@/components/ui/alert";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Settings,
-  Key,
-  Bot,
-  Plus,
-  Trash2,
-  Edit,
-  Check,
-  X,
-  AlertCircle,
-  RefreshCw,
-  Server,
-  CreditCard,
-  Thermometer,
-  TestTube,
-  ExternalLink,
-  Power,
-  Star,
-  Megaphone,
+  Key, Bot, Plus, Trash2, Edit, Check, AlertCircle, RefreshCw,
+  Server, CreditCard, TestTube, ExternalLink, Power, Star, Megaphone,
 } from "lucide-react";
-import { format } from "date-fns";
-import { de } from "date-fns/locale";
 import {
-  getLLMProviders,
-  getLLMConfigs,
-  createLLMConfig,
-  updateLLMConfig,
-  deleteLLMConfig,
-  setDefaultLLMConfig,
-  testLLMConfig,
-  getLLMGatewayStatus,
-  getMetaAdsStatus,
-  syncMetaAdsCampaigns,
-  syncMetaAdsAdSets,
-  syncMetaAdsAds,
-  syncMetaAdsInsights,
-  syncMetaAdsAll,
+  getLLMProviders, getLLMConfigs, createLLMConfig, updateLLMConfig,
+  deleteLLMConfig, activateLLMConfig, deactivateLLMConfig, setDefaultLLMConfig,
+  testLLMConfig, getLLMGatewayStatus, initializeLLMDefaultProviders,
+  getMetaAdsStatus, syncMetaAdsCampaigns, syncMetaAdsAdSets, syncMetaAdsAds,
+  syncMetaAdsInsights, syncMetaAdsAll,
 } from "@/lib/api";
-import { cn } from "@/lib/utils";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface LLMProvider {
   id: number;
@@ -102,264 +58,260 @@ interface LLMConfig {
   updated_at?: string;
 }
 
+interface FormData {
+  name: string;
+  provider_id: string;
+  model_name: string;
+  api_key: string;
+  max_tokens: number;
+  temperature: number;
+  top_p: number;
+  is_default: boolean;
+  cost_per_1k_input_tokens: number;
+  cost_per_1k_output_tokens: number;
+}
+
 const DEFAULT_MODELS: Record<string, string[]> = {
-  openai: ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+  openai:   ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
   deepseek: ["deepseek-chat", "deepseek-coder"],
-  kimi: ["kimi-latest", "kimi-pro"],
+  kimi:     ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
 };
 
+const EMPTY_FORM: FormData = {
+  name: "", provider_id: "", model_name: "", api_key: "",
+  max_tokens: 4096, temperature: 0.7, top_p: 1.0,
+  is_default: false, cost_per_1k_input_tokens: 0, cost_per_1k_output_tokens: 0,
+};
+
+// ── Helper: extract backend error detail ──────────────────────────────────────
+
+function extractError(err: any, fallback: string): string {
+  if (!err) return fallback;
+  if (err?.apiMessage) {
+    try { return JSON.parse(err.apiMessage)?.detail ?? err.apiMessage; }
+    catch { return err.apiMessage; }
+  }
+  return err?.message ?? fallback;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function SettingsPage() {
-  const [providers, setProviders] = useState<LLMProvider[]>([]);
-  const [configs, setConfigs] = useState<LLMConfig[]>([]);
+  const [providers, setProviders]       = useState<LLMProvider[]>([]);
+  const [configs, setConfigs]           = useState<LLMConfig[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<any>(null);
   const [metaAdsStatus, setMetaAdsStatus] = useState<any>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  
-  // Dialog states
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
-  const [testingConfig, setTestingConfig] = useState<number | null>(null);
-  
-  // Form states
-  const [formData, setFormData] = useState({
-    name: "",
-    provider_id: "",
-    model_name: "",
-    api_key: "",
-    max_tokens: 4096,
-    temperature: 0.7,
-    top_p: 1.0,
-    is_default: false,
-    cost_per_1k_input_tokens: 0,
-    cost_per_1k_output_tokens: 0,
-  });
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+  const [success, setSuccess]           = useState<string | null>(null);
+  const [isSyncing, setIsSyncing]       = useState(false);
+  const [syncError, setSyncError]       = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess]   = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  // dialog states
+  const [isAddOpen, setIsAddOpen]       = useState(false);
+  const [isEditOpen, setIsEditOpen]     = useState(false);
+  const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
+  const [testingId, setTestingId]       = useState<number | null>(null);
+
+  // form
+  const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  const set = (patch: Partial<FormData>) => setForm(prev => ({ ...prev, ...patch }));
+
+  // ── Data loading ─────────────────────────────────────────────────────────────
+
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const [providersRes, configsRes, statusRes, metaAdsStatusRes] = await Promise.all([
+      const [pRes, cRes, gRes, mRes] = await Promise.all([
         getLLMProviders().catch(() => null),
         getLLMConfigs().catch(() => null),
         getLLMGatewayStatus().catch(() => null),
         getMetaAdsStatus().catch(() => null),
       ]);
-      
-      if (providersRes) setProviders(providersRes);
-      if (configsRes?.configs) setConfigs(configsRes.configs);
-      if (statusRes) setGatewayStatus(statusRes);
-      if (metaAdsStatusRes) setMetaAdsStatus(metaAdsStatusRes);
+
+      // Auto-initialize default providers if DB is empty
+      let providerList: LLMProvider[] = Array.isArray(pRes) ? pRes : [];
+      if (providerList.length === 0) {
+        await initializeLLMDefaultProviders().catch(() => null);
+        const fresh = await getLLMProviders().catch(() => null);
+        providerList = Array.isArray(fresh) ? fresh : [];
+      }
+      setProviders(providerList);
+
+      if (cRes?.configs) setConfigs(cRes.configs);
+      if (gRes)          setGatewayStatus(gRes);
+      if (mRes)          setMetaAdsStatus(mRes);
     } catch (err) {
-      console.error("Failed to load settings:", err);
       setError("Fehler beim Laden der Einstellungen");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSync = async (type: string) => {
-    try {
-      setIsSyncing(true);
-      setSyncError(null);
-      setSyncSuccess(null);
-      let response;
-      switch (type) {
-        case 'campaigns':
-          response = await syncMetaAdsCampaigns();
-          break;
-        case 'adsets':
-          response = await syncMetaAdsAdSets();
-          break;
-        case 'ads':
-          response = await syncMetaAdsAds();
-          break;
-        case 'insights':
-          // For simplicity, we don't pass parameters; backend may use defaults
-          response = await syncMetaAdsInsights('campaign', [], new Date().toISOString().split('T')[0], new Date().toISOString().split('T')[0]);
-          break;
-        case 'all':
-          response = await syncMetaAdsAll();
-          break;
-        default:
-          throw new Error('Unbekannter Sync-Typ');
-      }
-      if (response.status === 'started' || response.status === 'success') {
-        setSyncSuccess(`Sync (${type}) erfolgreich gestartet.`);
-      } else {
-        setSyncError(`Sync fehlgeschlagen: ${response.message || 'Unbekannter Fehler'}`);
-      }
-    } catch (err) {
-      console.error('Sync error:', err);
-      setSyncError(err instanceof Error ? err.message : 'Unbekannter Fehler');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const showSuccess = (message: string) => {
-    setSuccess(message);
+  const showSuccess = (msg: string) => {
+    setSuccess(msg);
     setTimeout(() => setSuccess(null), 3000);
   };
+
+  // ── Config handlers ───────────────────────────────────────────────────────────
 
   const handleAddConfig = async () => {
     try {
       setError(null);
-      const response = await createLLMConfig({
-        ...formData,
-        provider_id: parseInt(formData.provider_id),
-      });
-      
-      if (response.status === "success") {
+      const res = await createLLMConfig({ ...form, provider_id: parseInt(form.provider_id) });
+      if (res.status === "success") {
         showSuccess("Konfiguration erfolgreich erstellt");
-        setIsAddDialogOpen(false);
-        resetForm();
+        setIsAddOpen(false);
+        setForm(EMPTY_FORM);
         loadData();
       } else {
-        setError(response.detail || "Fehler beim Erstellen");
+        setError("Fehler beim Erstellen der Konfiguration");
       }
-    } catch (err) {
-      console.error("Failed to create config:", err);
-      setError("Fehler beim Erstellen der Konfiguration");
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Erstellen der Konfiguration"));
     }
   };
 
   const handleUpdateConfig = async () => {
     if (!editingConfig) return;
-    
     try {
       setError(null);
-      const updateData: any = {
-        name: formData.name,
-        model_name: formData.model_name,
-        max_tokens: formData.max_tokens,
-        temperature: formData.temperature,
-        top_p: formData.top_p,
-        is_default: formData.is_default,
-        cost_per_1k_input_tokens: formData.cost_per_1k_input_tokens,
-        cost_per_1k_output_tokens: formData.cost_per_1k_output_tokens,
+      const payload: any = {
+        name: form.name,
+        model_name: form.model_name,
+        max_tokens: form.max_tokens,
+        temperature: form.temperature,
+        top_p: form.top_p,
+        is_default: form.is_default,
+        cost_per_1k_input_tokens: form.cost_per_1k_input_tokens,
+        cost_per_1k_output_tokens: form.cost_per_1k_output_tokens,
       };
-      
-      if (formData.api_key) {
-        updateData.api_key = formData.api_key;
-      }
-      
-      const response = await updateLLMConfig(editingConfig.id, updateData);
-      
-      if (response.status === "success") {
+      if (form.api_key) payload.api_key = form.api_key;
+
+      const res = await updateLLMConfig(editingConfig.id, payload);
+      if (res.status === "success") {
         showSuccess("Konfiguration erfolgreich aktualisiert");
-        setIsEditDialogOpen(false);
+        setIsEditOpen(false);
         setEditingConfig(null);
-        resetForm();
+        setForm(EMPTY_FORM);
         loadData();
       } else {
-        setError(response.detail || "Fehler beim Aktualisieren");
+        setError("Fehler beim Aktualisieren");
       }
-    } catch (err) {
-      console.error("Failed to update config:", err);
-      setError("Fehler beim Aktualisieren der Konfiguration");
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Aktualisieren der Konfiguration"));
     }
   };
 
-  const handleDeleteConfig = async (configId: number) => {
-    if (!confirm("Möchten Sie diese Konfiguration wirklich löschen?")) return;
-    
+  const handleDeleteConfig = async (id: number) => {
+    if (!confirm("Konfiguration wirklich löschen?")) return;
     try {
-      await deleteLLMConfig(configId);
+      await deleteLLMConfig(id);
       showSuccess("Konfiguration gelöscht");
       loadData();
-    } catch (err) {
-      console.error("Failed to delete config:", err);
-      setError("Fehler beim Löschen");
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Löschen"));
     }
   };
 
-  const handleSetDefault = async (configId: number) => {
+  const handleToggleActive = async (cfg: LLMConfig) => {
     try {
-      await setDefaultLLMConfig(configId);
-      showSuccess("Als Standard gesetzt");
-      loadData();
-    } catch (err) {
-      console.error("Failed to set default:", err);
-      setError("Fehler beim Setzen als Standard");
-    }
-  };
-
-  const handleTestConfig = async (configId: number) => {
-    try {
-      setTestingConfig(configId);
-      const response = await testLLMConfig(configId);
-      
-      if (response.status === "success") {
-        alert(`Test erfolgreich!\nAntwort: ${response.response?.slice(0, 100)}...\nLatency: ${response.latency_ms}ms`);
-      } else {
-        alert(`Test fehlgeschlagen: ${response.detail}`);
+      const res = cfg.is_active
+        ? await deactivateLLMConfig(cfg.id)
+        : await activateLLMConfig(cfg.id);
+      if (res.status === "success") {
+        showSuccess(cfg.is_active ? "Konfiguration deaktiviert" : "Konfiguration aktiviert");
+        loadData();
       }
-    } catch (err) {
-      console.error("Failed to test config:", err);
-      alert("Test fehlgeschlagen");
-    } finally {
-      setTestingConfig(null);
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Ändern des Status"));
     }
   };
 
-  const openEditDialog = (config: LLMConfig) => {
-    setEditingConfig(config);
-    setFormData({
-      name: config.name,
-      provider_id: config.provider_id.toString(),
-      model_name: config.model_name,
-      api_key: "",
-      max_tokens: config.max_tokens,
-      temperature: config.temperature,
-      top_p: config.top_p,
-      is_default: config.is_default,
-      cost_per_1k_input_tokens: config.cost_per_1k_input_tokens,
-      cost_per_1k_output_tokens: config.cost_per_1k_output_tokens,
-    });
-    setIsEditDialogOpen(true);
+  const handleSetDefault = async (id: number) => {
+    try {
+      const res = await setDefaultLLMConfig(id);
+      if (res.status === "success") { showSuccess("Als Standard gesetzt"); loadData(); }
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Setzen als Standard"));
+    }
   };
 
-  const resetForm = () => {
-    setFormData({
-      name: "",
-      provider_id: "",
-      model_name: "",
-      api_key: "",
-      max_tokens: 4096,
-      temperature: 0.7,
-      top_p: 1.0,
-      is_default: false,
-      cost_per_1k_input_tokens: 0,
-      cost_per_1k_output_tokens: 0,
-    });
+  const handleTestConfig = async (id: number) => {
+    try {
+      setTestingId(id);
+      const res = await testLLMConfig(id);
+      if (res.status === "success") {
+        alert(`✅ Test erfolgreich!\nAntwort: ${res.response?.slice(0, 100)}...\nLatency: ${res.latency_ms}ms`);
+      } else {
+        alert(`❌ Test fehlgeschlagen: ${res.detail}`);
+      }
+    } catch (err: any) {
+      alert(`❌ Test fehlgeschlagen: ${extractError(err, "Unbekannter Fehler")}`);
+    } finally {
+      setTestingId(null);
+    }
   };
 
-  const getProviderName = (providerId: number) => {
-    return providers.find((p) => p.id === providerId)?.display_name || "Unknown";
+  const openEditDialog = (cfg: LLMConfig) => {
+    setEditingConfig(cfg);
+    setForm({
+      name: cfg.name, provider_id: cfg.provider_id.toString(),
+      model_name: cfg.model_name, api_key: "",
+      max_tokens: cfg.max_tokens, temperature: cfg.temperature,
+      top_p: cfg.top_p, is_default: cfg.is_default,
+      cost_per_1k_input_tokens: cfg.cost_per_1k_input_tokens,
+      cost_per_1k_output_tokens: cfg.cost_per_1k_output_tokens,
+    });
+    setIsEditOpen(true);
   };
+
+  // ── Sync handler ──────────────────────────────────────────────────────────────
+
+  const handleSync = async (type: string) => {
+    try {
+      setIsSyncing(true); setSyncError(null); setSyncSuccess(null);
+      const today = new Date().toISOString().split("T")[0];
+      let res: any;
+      if (type === "campaigns") res = await syncMetaAdsCampaigns();
+      else if (type === "adsets") res = await syncMetaAdsAdSets();
+      else if (type === "ads") res = await syncMetaAdsAds();
+      else if (type === "insights") res = await syncMetaAdsInsights("campaign", [], today, today);
+      else res = await syncMetaAdsAll();
+
+      if (res.status === "started" || res.status === "success") {
+        setSyncSuccess(`Sync (${type}) erfolgreich gestartet`);
+      } else {
+        setSyncError(`Sync fehlgeschlagen: ${res.message ?? "Unbekannter Fehler"}`);
+      }
+    } catch (err: any) {
+      setSyncError(extractError(err, "Sync fehlgeschlagen"));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  const getProviderName = (id: number) =>
+    providers.find(p => p.id === id)?.display_name ?? "Unknown";
 
   const getAvailableModels = () => {
-    const provider = providers.find((p) => p.id === parseInt(formData.provider_id));
-    if (!provider) return [];
-    return DEFAULT_MODELS[provider.name] || [];
+    const p = providers.find(p => p.id === parseInt(form.provider_id));
+    return p ? (DEFAULT_MODELS[p.name] ?? []) : [];
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-full">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
       </DashboardLayout>
     );
@@ -371,9 +323,7 @@ export default function SettingsPage() {
         {/* Header */}
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Einstellungen</h1>
-          <p className="text-muted-foreground">
-            Konfiguration des Systems und der LLM-Integration
-          </p>
+          <p className="text-muted-foreground">Konfiguration des Systems und der LLM-Integration</p>
         </div>
 
         {error && (
@@ -382,7 +332,6 @@ export default function SettingsPage() {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-
         {success && (
           <Alert className="bg-green-50 border-green-200">
             <Check className="h-4 w-4 text-green-600" />
@@ -392,205 +341,59 @@ export default function SettingsPage() {
 
         <Tabs defaultValue="llm" className="space-y-6">
           <TabsList>
-            <TabsTrigger value="llm" className="flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              LLM Konfiguration
-            </TabsTrigger>
-            <TabsTrigger value="ads" className="flex items-center gap-2">
-              <Megaphone className="h-4 w-4" />
-              Ads Provider
-            </TabsTrigger>
-            <TabsTrigger value="system" className="flex items-center gap-2">
-              <Server className="h-4 w-4" />
-              System Status
-            </TabsTrigger>
+            <TabsTrigger value="llm"><Bot className="h-4 w-4 mr-2" />LLM Konfiguration</TabsTrigger>
+            <TabsTrigger value="ads"><Megaphone className="h-4 w-4 mr-2" />Ads Provider</TabsTrigger>
+            <TabsTrigger value="system"><Server className="h-4 w-4 mr-2" />System Status</TabsTrigger>
           </TabsList>
 
-          {/* LLM Configuration Tab */}
+          {/* ── LLM Tab ── */}
           <TabsContent value="llm" className="space-y-6">
-            {/* Gateway Status Card */}
+
+            {/* Gateway Status */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Power className="h-5 w-5" />
-                  LLM Gateway Status
-                </CardTitle>
-                <CardDescription>
-                  Aktueller Status des LLM Gateways
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2"><Power className="h-5 w-5" />LLM Gateway Status</CardTitle>
+                <CardDescription>Aktueller Status des LLM Gateways</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-4">
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Status</p>
-                    <Badge variant={gatewayStatus?.initialized ? "default" : "destructive"}>
-                      {gatewayStatus?.initialized ? "Aktiv" : "Inaktiv"}
-                    </Badge>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Provider</p>
-                    <p className="text-2xl font-bold">{gatewayStatus?.providers || 0}</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Gesamte Anfragen</p>
-                    <p className="text-2xl font-bold">{gatewayStatus?.total_requests || 0}</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Erfolgsrate</p>
-                    <p className="text-2xl font-bold">
-                      {gatewayStatus?.success_rate ? `${(gatewayStatus.success_rate * 100).toFixed(1)}%` : "N/A"}
-                    </p>
-                  </div>
+                  {[
+                    { label: "Status", value: <Badge variant={gatewayStatus?.initialized ? "default" : "destructive"}>{gatewayStatus?.initialized ? "Aktiv" : "Inaktiv"}</Badge> },
+                    { label: "Provider", value: gatewayStatus?.providers ?? 0 },
+                    { label: "Anfragen", value: gatewayStatus?.total_requests ?? 0 },
+                    { label: "Erfolgsrate", value: gatewayStatus?.success_rate ? `${(gatewayStatus.success_rate * 100).toFixed(1)}%` : "N/A" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-muted p-4 rounded-lg">
+                      <p className="text-sm text-muted-foreground">{label}</p>
+                      <p className="text-2xl font-bold">{value}</p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Configurations List */}
+            {/* Configs list + Add button */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Key className="h-5 w-5" />
-                    LLM Konfigurationen
-                  </CardTitle>
-                  <CardDescription>
-                    Verwalten Sie Ihre LLM-Provider und API-Keys
-                  </CardDescription>
+                  <CardTitle className="flex items-center gap-2"><Key className="h-5 w-5" />LLM Konfigurationen</CardTitle>
+                  <CardDescription>Verwalten Sie Ihre LLM-Provider und API-Keys</CardDescription>
                 </div>
-                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+
+                {/* Add Dialog */}
+                <Dialog open={isAddOpen} onOpenChange={o => { setIsAddOpen(o); if (!o) setForm(EMPTY_FORM); }}>
                   <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Hinzufügen
-                    </Button>
+                    <Button><Plus className="h-4 w-4 mr-2" />Hinzufügen</Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Neue LLM Konfiguration</DialogTitle>
-                      <DialogDescription>
-                        Fügen Sie einen neuen LLM-Provider mit API-Key hinzu
-                      </DialogDescription>
+                      <DialogDescription>Fügen Sie einen neuen LLM-Provider mit API-Key hinzu</DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="name">Name</Label>
-                        <Input
-                          id="name"
-                          value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          placeholder="z.B. OpenAI Production"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="provider">Provider</Label>
-                        <Select
-                          value={formData.provider_id}
-                          onValueChange={(value) => setFormData({ ...formData, provider_id: value, model_name: "" })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Provider wählen" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {providers.map((provider) => (
-                              <SelectItem key={provider.id} value={provider.id.toString()}>
-                                {provider.display_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="model">Modell</Label>
-                        <Select
-                          value={formData.model_name}
-                          onValueChange={(value) => setFormData({ ...formData, model_name: value })}
-                          disabled={!formData.provider_id}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder={formData.provider_id ? "Modell wählen" : "Zuerst Provider wählen"} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {getAvailableModels().map((model) => (
-                              <SelectItem key={model} value={model}>
-                                {model}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="api_key">API Key</Label>
-                        <Input
-                          id="api_key"
-                          type="password"
-                          value={formData.api_key}
-                          onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                          placeholder="sk-..."
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="max_tokens">Max Tokens ({formData.max_tokens})</Label>
-                        <Input
-                          id="max_tokens"
-                          type="number"
-                          value={formData.max_tokens}
-                          onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) || 4096 })}
-                          min={256}
-                          max={8192}
-                          step={256}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="temperature">Temperature ({formData.temperature})</Label>
-                        <Input
-                          id="temperature"
-                          type="number"
-                          value={formData.temperature}
-                          onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) || 0.7 })}
-                          min={0}
-                          max={2}
-                          step={0.1}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label>Kosten pro 1k Tokens</Label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Input</Label>
-                            <Input
-                              type="number"
-                              step="0.0001"
-                              value={formData.cost_per_1k_input_tokens}
-                              onChange={(e) => setFormData({ ...formData, cost_per_1k_input_tokens: parseFloat(e.target.value) || 0 })}
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Output</Label>
-                            <Input
-                              type="number"
-                              step="0.0001"
-                              value={formData.cost_per_1k_output_tokens}
-                              onChange={(e) => setFormData({ ...formData, cost_per_1k_output_tokens: parseFloat(e.target.value) || 0 })}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          id="is_default"
-                          checked={formData.is_default}
-                          onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                        />
-                        <Label htmlFor="is_default">Als Standard verwenden</Label>
-                      </div>
-                    </div>
+                    <ConfigForm form={form} set={set} providers={providers} models={getAvailableModels()} isEdit={false} />
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); resetForm(); }}>
-                        Abbrechen
-                      </Button>
-                      <Button onClick={handleAddConfig} disabled={!formData.name || !formData.provider_id || !formData.model_name || !formData.api_key}>
+                      <Button variant="outline" onClick={() => { setIsAddOpen(false); setForm(EMPTY_FORM); }}>Abbrechen</Button>
+                      <Button onClick={handleAddConfig} disabled={!form.name || !form.provider_id || !form.model_name || !form.api_key}>
                         Speichern
                       </Button>
                     </DialogFooter>
@@ -598,97 +401,21 @@ export default function SettingsPage() {
                 </Dialog>
 
                 {/* Edit Dialog */}
-                <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <Dialog open={isEditOpen} onOpenChange={o => { setIsEditOpen(o); if (!o) { setEditingConfig(null); setForm(EMPTY_FORM); } }}>
                   <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                      <DialogTitle>LLM Konfiguration bearbeiten</DialogTitle>
-                      <DialogDescription>
-                        Aktualisieren Sie die Konfiguration
-                      </DialogDescription>
+                      <DialogTitle>Konfiguration bearbeiten</DialogTitle>
+                      <DialogDescription>Aktualisieren Sie die Konfiguration</DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit_name">Name</Label>
-                        <Input
-                          id="edit_name"
-                          value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit_model">Modell</Label>
-                        <Select
-                          value={formData.model_name}
-                          onValueChange={(value) => setFormData({ ...formData, model_name: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {getAvailableModels().map((model) => (
-                              <SelectItem key={model} value={model}>
-                                {model}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit_api_key">Neuer API Key (optional)</Label>
-                        <Input
-                          id="edit_api_key"
-                          type="password"
-                          value={formData.api_key}
-                          onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                          placeholder="Nur eingeben wenn ändern"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit_max_tokens">Max Tokens ({formData.max_tokens})</Label>
-                        <Input
-                          id="edit_max_tokens"
-                          type="number"
-                          value={formData.max_tokens}
-                          onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) || 4096 })}
-                          min={256}
-                          max={8192}
-                          step={256}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="edit_temperature">Temperature ({formData.temperature})</Label>
-                        <Input
-                          id="edit_temperature"
-                          type="number"
-                          value={formData.temperature}
-                          onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) || 0.7 })}
-                          min={0}
-                          max={2}
-                          step={0.1}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          id="edit_is_default"
-                          checked={formData.is_default}
-                          onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                        />
-                        <Label htmlFor="edit_is_default">Als Standard verwenden</Label>
-                      </div>
-                    </div>
+                    <ConfigForm form={form} set={set} providers={providers} models={getAvailableModels()} isEdit />
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => { setIsEditDialogOpen(false); setEditingConfig(null); }}>
-                        Abbrechen
-                      </Button>
-                      <Button onClick={handleUpdateConfig}>
-                        Aktualisieren
-                      </Button>
+                      <Button variant="outline" onClick={() => { setIsEditOpen(false); setEditingConfig(null); setForm(EMPTY_FORM); }}>Abbrechen</Button>
+                      <Button onClick={handleUpdateConfig}>Aktualisieren</Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
               </CardHeader>
+
               <CardContent>
                 {configs.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
@@ -709,72 +436,56 @@ export default function SettingsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {configs.map((config) => (
-                        <TableRow key={config.id}>
+                      {configs.map(cfg => (
+                        <TableRow key={cfg.id}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
-                              {config.name}
-                              {config.is_default && (
-                                <Badge variant="default" className="bg-yellow-500">
-                                  <Star className="h-3 w-3 mr-1" />
-                                  Standard
+                              {cfg.name}
+                              {cfg.is_default && (
+                                <Badge className="bg-yellow-500">
+                                  <Star className="h-3 w-3 mr-1" />Standard
                                 </Badge>
                               )}
                             </div>
                           </TableCell>
-                          <TableCell>{getProviderName(config.provider_id)}</TableCell>
-                          <TableCell>{config.model_name}</TableCell>
+                          <TableCell>{getProviderName(cfg.provider_id)}</TableCell>
+                          <TableCell>{cfg.model_name}</TableCell>
                           <TableCell>
-                            <Badge variant={config.is_active ? "default" : "secondary"}>
-                              {config.is_active ? "Aktiv" : "Inaktiv"}
-                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleToggleActive(cfg)}
+                              className="px-2 h-7"
+                              title={cfg.is_active ? "Deaktivieren" : "Aktivieren"}
+                            >
+                              <Badge variant={cfg.is_active ? "default" : "secondary"} className="cursor-pointer">
+                                <Power className="h-3 w-3 mr-1" />
+                                {cfg.is_active ? "Aktiv" : "Inaktiv"}
+                              </Badge>
+                            </Button>
                           </TableCell>
                           <TableCell>
                             <div className="text-xs">
-                              <div>In: ${config.cost_per_1k_input_tokens.toFixed(4)}</div>
-                              <div>Out: ${config.cost_per_1k_output_tokens.toFixed(4)}</div>
+                              <div>In: ${cfg.cost_per_1k_input_tokens.toFixed(4)}</div>
+                              <div>Out: ${cfg.cost_per_1k_output_tokens.toFixed(4)}</div>
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              {!config.is_default && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleSetDefault(config.id)}
-                                  title="Als Standard setzen"
-                                >
+                            <div className="flex justify-end gap-1">
+                              {!cfg.is_default && (
+                                <Button variant="ghost" size="icon" onClick={() => handleSetDefault(cfg.id)} title="Als Standard setzen">
                                   <Star className="h-4 w-4" />
                                 </Button>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleTestConfig(config.id)}
-                                disabled={testingConfig === config.id}
-                                title="Testen"
-                              >
-                                {testingConfig === config.id ? (
-                                  <RefreshCw className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <TestTube className="h-4 w-4" />
-                                )}
+                              <Button variant="ghost" size="icon" onClick={() => handleTestConfig(cfg.id)} disabled={testingId === cfg.id} title="Testen">
+                                {testingId === cfg.id
+                                  ? <RefreshCw className="h-4 w-4 animate-spin" />
+                                  : <TestTube className="h-4 w-4" />}
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEditDialog(config)}
-                                title="Bearbeiten"
-                              >
+                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(cfg)} title="Bearbeiten">
                                 <Edit className="h-4 w-4" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteConfig(config.id)}
-                                className="text-destructive hover:text-destructive"
-                                title="Löschen"
-                              >
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteConfig(cfg.id)} className="text-destructive" title="Löschen">
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
@@ -787,28 +498,21 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
 
-            {/* Available Providers Info */}
+            {/* Available Providers */}
             <Card>
               <CardHeader>
                 <CardTitle>Verfügbare Provider</CardTitle>
-                <CardDescription>
-                  Unterstützte LLM-Provider im System
-                </CardDescription>
+                <CardDescription>Unterstützte LLM-Provider im System</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-3">
-                  {providers.map((provider) => (
-                    <div key={provider.id} className="border rounded-lg p-4">
-                      <h4 className="font-semibold">{provider.display_name}</h4>
-                      <p className="text-sm text-muted-foreground mb-2">{provider.name}</p>
-                      <a
-                        href={provider.docs_url || provider.base_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary flex items-center gap-1 hover:underline"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Dokumentation
+                  {providers.map(p => (
+                    <div key={p.id} className="border rounded-lg p-4">
+                      <h4 className="font-semibold">{p.display_name}</h4>
+                      <p className="text-sm text-muted-foreground mb-2">{p.name}</p>
+                      <a href={p.docs_url ?? p.base_url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-primary flex items-center gap-1 hover:underline">
+                        <ExternalLink className="h-3 w-3" />Dokumentation
                       </a>
                     </div>
                   ))}
@@ -817,85 +521,57 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          {/* Ads Provider Tab */}
+          {/* ── Ads Tab ── */}
           <TabsContent value="ads" className="space-y-6">
-            {/* Meta Ads Status Card */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Megaphone className="h-5 w-5" />
-                  Meta Ads Status
-                </CardTitle>
-                <CardDescription>
-                  Status der Meta Ads API Integration
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" />Meta Ads Status</CardTitle>
+                <CardDescription>Status der Meta Ads API Integration</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-4">
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Status</p>
-                    <Badge variant={metaAdsStatus?.status === 'configured' ? 'default' : 'destructive'}>
-                      {metaAdsStatus?.status === 'configured' ? 'Konfiguriert' : 'Nicht konfiguriert'}
-                    </Badge>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Modus</p>
-                    <p className="text-2xl font-bold">{metaAdsStatus?.mode === 'real' ? 'Live' : 'Mock'}</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Account ID</p>
-                    <p className="text-lg font-mono">{metaAdsStatus?.account_id || 'Nicht gesetzt'}</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Access Token</p>
-                    <p className="text-lg font-mono">{metaAdsStatus?.has_access_token ? 'Vorhanden' : 'Fehlt'}</p>
-                  </div>
+                  {[
+                    { label: "Status", value: <Badge variant={metaAdsStatus?.status === "configured" ? "default" : "destructive"}>{metaAdsStatus?.status === "configured" ? "Konfiguriert" : "Nicht konfiguriert"}</Badge> },
+                    { label: "Modus", value: metaAdsStatus?.mode === "real" ? "Live" : "Mock" },
+                    { label: "Account ID", value: metaAdsStatus?.account_id ?? "Nicht gesetzt" },
+                    { label: "Access Token", value: metaAdsStatus?.has_access_token ? "Vorhanden" : "Fehlt" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-muted p-4 rounded-lg">
+                      <p className="text-sm text-muted-foreground">{label}</p>
+                      <p className="text-lg font-bold">{value}</p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Sync Actions */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <RefreshCw className="h-5 w-5" />
-                  Meta Ads Sync
-                </CardTitle>
-                <CardDescription>
-                  Manuellen Sync von Meta Ads Daten starten
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2"><RefreshCw className="h-5 w-5" />Meta Ads Sync</CardTitle>
+                <CardDescription>Manuellen Sync von Meta Ads Daten starten</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  <Button onClick={() => handleSync('campaigns')} disabled={isSyncing}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Kampagnen syncen
-                  </Button>
-                  <Button onClick={() => handleSync('adsets')} disabled={isSyncing}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    AdSets syncen
-                  </Button>
-                  <Button onClick={() => handleSync('ads')} disabled={isSyncing}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Ads syncen
-                  </Button>
-                  <Button onClick={() => handleSync('insights')} disabled={isSyncing}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Insights syncen
-                  </Button>
-                  <Button onClick={() => handleSync('all')} disabled={isSyncing} variant="default">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Vollständiger Sync
-                  </Button>
+                  {[
+                    { type: "campaigns", label: "Kampagnen" },
+                    { type: "adsets",    label: "AdSets" },
+                    { type: "ads",       label: "Ads" },
+                    { type: "insights",  label: "Insights" },
+                    { type: "all",       label: "Vollständig" },
+                  ].map(({ type, label }) => (
+                    <Button key={type} onClick={() => handleSync(type)} disabled={isSyncing}>
+                      <RefreshCw className="h-4 w-4 mr-2" />{label} syncen
+                    </Button>
+                  ))}
                 </div>
                 {syncError && (
-                  <Alert variant="destructive" className="mt-4">
+                  <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
                     <AlertDescription>{syncError}</AlertDescription>
                   </Alert>
                 )}
                 {syncSuccess && (
-                  <Alert className="mt-4 bg-green-50 border-green-200">
+                  <Alert className="bg-green-50 border-green-200">
                     <Check className="h-4 w-4 text-green-600" />
                     <AlertDescription className="text-green-800">{syncSuccess}</AlertDescription>
                   </Alert>
@@ -904,58 +580,45 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          {/* System Status Tab */}
+          {/* ── System Tab ── */}
           <TabsContent value="system" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Server className="h-5 w-5" />
-                  System Informationen
-                </CardTitle>
+                <CardTitle className="flex items-center gap-2"><Server className="h-5 w-5" />System Informationen</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Frontend Version</p>
-                    <p className="text-lg font-semibold">1.0.0</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Backend API</p>
-                    <p className="text-lg font-semibold">/api/v1</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">Database</p>
-                    <p className="text-lg font-semibold">MongoDB</p>
-                  </div>
-                  <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">AI Layer</p>
-                    <p className="text-lg font-semibold">Multi-LLM Gateway</p>
-                  </div>
+                  {[
+                    { label: "Frontend Version", value: "1.0.0" },
+                    { label: "Backend API",       value: "/api/v1" },
+                    { label: "Database",          value: "MongoDB" },
+                    { label: "AI Layer",          value: "Multi-LLM Gateway" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-muted p-4 rounded-lg">
+                      <p className="text-sm text-muted-foreground">{label}</p>
+                      <p className="text-lg font-semibold">{value}</p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5" />
-                  Kostenübersicht
-                </CardTitle>
-                <CardDescription>
-                  Geschätzte Kosten basierend auf Token-Nutzung
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Kostenübersicht</CardTitle>
+                <CardDescription>Kosten pro 1k Tokens nach Konfiguration</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {configs.map((config) => (
-                    <div key={config.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div className="space-y-3">
+                  {configs.map(cfg => (
+                    <div key={cfg.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
                       <div>
-                        <p className="font-medium">{config.name}</p>
-                        <p className="text-sm text-muted-foreground">{config.model_name}</p>
+                        <p className="font-medium">{cfg.name}</p>
+                        <p className="text-sm text-muted-foreground">{cfg.model_name}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm">${config.cost_per_1k_input_tokens.toFixed(4)} / ${config.cost_per_1k_output_tokens.toFixed(4)}</p>
-                        <p className="text-xs text-muted-foreground">pro 1k Tokens</p>
+                      <div className="text-right text-sm">
+                        <p>${cfg.cost_per_1k_input_tokens.toFixed(4)} / ${cfg.cost_per_1k_output_tokens.toFixed(4)}</p>
+                        <p className="text-xs text-muted-foreground">In / Out pro 1k</p>
                       </div>
                     </div>
                   ))}
@@ -966,5 +629,92 @@ export default function SettingsPage() {
         </Tabs>
       </div>
     </DashboardLayout>
+  );
+}
+
+// ── Shared form component ─────────────────────────────────────────────────────
+
+function ConfigForm({
+  form, set, providers, models, isEdit,
+}: {
+  form: FormData;
+  set: (patch: Partial<FormData>) => void;
+  providers: LLMProvider[];
+  models: string[];
+  isEdit: boolean;
+}) {
+  return (
+    <div className="grid gap-4 py-4">
+      <div className="grid gap-2">
+        <Label>Name</Label>
+        <Input value={form.name} onChange={e => set({ name: e.target.value })} placeholder="z.B. OpenAI Production" />
+      </div>
+
+      {!isEdit && (
+        <div className="grid gap-2">
+          <Label>Provider</Label>
+          <Select value={form.provider_id} onValueChange={v => set({ provider_id: v, model_name: "" })}>
+            <SelectTrigger><SelectValue placeholder="Provider wählen" /></SelectTrigger>
+            <SelectContent>
+              {providers.map(p => (
+                <SelectItem key={p.id} value={p.id.toString()}>{p.display_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        <Label>Modell</Label>
+        <Select value={form.model_name} onValueChange={v => set({ model_name: v })} disabled={!form.provider_id}>
+          <SelectTrigger><SelectValue placeholder={form.provider_id ? "Modell wählen" : "Zuerst Provider wählen"} /></SelectTrigger>
+          <SelectContent>
+            {models.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>{isEdit ? "Neuer API Key (optional)" : "API Key"}</Label>
+        <Input type="password" value={form.api_key} onChange={e => set({ api_key: e.target.value })}
+          placeholder={isEdit ? "Nur eingeben wenn ändern" : "sk-..."} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label>Max Tokens ({form.max_tokens})</Label>
+          <Input type="number" value={form.max_tokens} min={256} max={128000} step={256}
+            onChange={e => set({ max_tokens: parseInt(e.target.value) || 4096 })} />
+        </div>
+        <div className="grid gap-2">
+          <Label>Temperature ({form.temperature})</Label>
+          <Input type="number" value={form.temperature} min={0} max={2} step={0.1}
+            onChange={e => set({ temperature: parseFloat(e.target.value) || 0.7 })} />
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>Kosten pro 1k Tokens</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label className="text-xs text-muted-foreground">Input</Label>
+            <Input type="number" step="0.0001" value={form.cost_per_1k_input_tokens}
+              onChange={e => set({ cost_per_1k_input_tokens: parseFloat(e.target.value) || 0 })} />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Output</Label>
+            <Input type="number" step="0.0001" value={form.cost_per_1k_output_tokens}
+              onChange={e => set({ cost_per_1k_output_tokens: parseFloat(e.target.value) || 0 })} />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input type="checkbox" id="is_default" checked={form.is_default}
+          onChange={e => set({ is_default: e.target.checked })}
+          className="h-4 w-4 rounded border-gray-300" />
+        <Label htmlFor="is_default">Als Standard verwenden</Label>
+      </div>
+    </div>
   );
 }

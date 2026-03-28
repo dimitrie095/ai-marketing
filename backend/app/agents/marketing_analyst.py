@@ -10,7 +10,7 @@ import json
 import re
 from pydantic import BaseModel
 from app.llm import llm_gateway, LLMProvider
-from app.llm.prompts import prompt_framework, PromptType
+from app.llm.prompts import prompt_framework, PromptType, PromptTemplate, PromptVariable
 from app.services.kpi_service import KPIService
 from app.db.models import Campaign, Metric, ProcessedData
 import logging
@@ -118,7 +118,7 @@ class KPIAnalysisAgent:
         """
         try:
             # Get campaign data
-            campaign = await Campaign.find_one({"id": campaign_id})
+            campaign = await Campaign.get(campaign_id)
             if not campaign:
                 raise ValueError(f"Campaign {campaign_id} not found")
             
@@ -378,7 +378,7 @@ class RootCauseAnalysisAgent:
         """
         try:
             # Get campaign data
-            campaign = await Campaign.find_one({"id": campaign_id})
+            campaign = await Campaign.get(campaign_id)
             if not campaign:
                 raise ValueError(f"Campaign {campaign_id} not found")
             
@@ -391,7 +391,7 @@ class RootCauseAnalysisAgent:
             )
             
             # Get data before drop (comparison period)
-            start_comparison = start_date_drop - datetime.timedelta(days=comparison_period_days)
+            start_comparison = start_date_drop - dt.timedelta(days=comparison_period_days)
             comparison_period_data = await KPIService.get_kpi_for_entity(
                 entity_type="campaign",
                 entity_id=campaign_id,

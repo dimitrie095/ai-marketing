@@ -7,8 +7,9 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from beanie import Document, Link, Indexed
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, field_validator
 from enum import Enum
+from app.db.models import decimal128_to_decimal
 
 
 class PromptType(str, Enum):
@@ -121,7 +122,16 @@ class LLMConfig(Document):
     cost_per_1k_output_tokens: Decimal = Field(default=Decimal("0"))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
-    
+
+    @field_validator(
+        "temperature", "top_p",
+        "cost_per_1k_input_tokens", "cost_per_1k_output_tokens",
+        mode="before",
+    )
+    @classmethod
+    def coerce_decimal128(cls, v):
+        return decimal128_to_decimal(v)
+
     # Model config to avoid protected namespace warning
     model_config = {'protected_namespaces': ()}
     

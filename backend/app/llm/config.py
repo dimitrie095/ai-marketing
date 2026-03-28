@@ -85,33 +85,49 @@ class LLMConfigManager:
         configs = []
         
         try:
-            # Lade alle aktiven Configs
-            llm_configs = await LLMConfig.find({"is_active": True}).to_list()
-            
+            # Nur den Default-Config laden; fallback auf zuletzt erstellten aktiven
+            active_config = await LLMConfig.find_one(
+                LLMConfig.is_default == True,
+                LLMConfig.is_active == True
+            )
+            if not active_config:
+                active_config = await LLMConfig.find(
+                    LLMConfig.is_active == True
+                ).sort([("_id", -1)]).limit(1).first_or_none()
+            if not active_config:
+                logger.warning("⚠️ Keine aktive LLM-Konfiguration in der DB gefunden")
+                return configs
+
+            llm_configs = [active_config]
+
             for config in llm_configs:
-                # Lade Provider-Info
-                provider = await LLMProvider.find_one({"id": config.provider_id})
+                # Lade Provider-Info (Beanie get() für _id lookup)
+                provider = await LLMProviderModel.get(config.provider_id)
                 if not provider:
                     logger.warning(f"Provider {config.provider_id} nicht gefunden")
                     continue
-                
-                # Konvertiere zu LLMProvider
-                provider_enum = LLMProvider(provider.name.lower())
-                
+
+                # Konvertiere zu LLMProviderEnum
+                try:
+                    provider_enum = LLMProvider(provider.name.lower())
+                except ValueError:
+                    logger.warning(f"Unbekannter Provider-Name: {provider.name}")
+                    continue
+
                 configs.append(LLMProviderConfig(
                     provider=provider_enum,
                     model=config.model_name,
-                    api_key=config.api_key_encrypted,  # TODO: Decrypt
-                    base_url=config.base_url,
+                    api_key=config.api_key_encrypted,
+                    base_url=provider.base_url,
                     max_tokens=config.max_tokens,
-                    temperature=config.temperature,
+                    temperature=float(config.temperature),
                     is_active=config.is_active,
                     is_default=config.is_default,
                     cost_per_1k_input_tokens=float(config.cost_per_1k_input_tokens),
                     cost_per_1k_output_tokens=float(config.cost_per_1k_output_tokens)
                 ))
-            
-            logger.info(f"✅ {len(configs)} LLM-Konfigurationen aus DB geladen")
+
+            logger.info(f"✅ LLM-Konfiguration aus DB geladen: {configs[0].provider if configs else 'none'}")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden der DB-Konfigurationen: {e}")

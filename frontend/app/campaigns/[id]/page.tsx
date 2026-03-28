@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard/layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -71,6 +71,7 @@ import {
 import Link from "next/link";
 import {
   getCampaign,
+  getCampaigns,
   getCampaignAdSets,
   getCampaignAds,
   getEntityKPIs,
@@ -182,6 +183,7 @@ export default function CampaignDetailPage() {
   const [appliedRecommendations, setAppliedRecommendations] = useState<Set<string>>(new Set());
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([]);
   const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const [loadingChat, setLoadingChat] = useState(false);
   const [selectedTrendMetric, setSelectedTrendMetric] = useState<string>('spend');
   const trendMetricsOptions = [
@@ -562,7 +564,7 @@ export default function CampaignDetailPage() {
         endDateDrop,
         7
       );
-      if (response.status === 'success' && response.data) {
+      if (response.success && response.data) {
         const transformed = transformRootCauseData(response.data);
         setRootCauseData(transformed);
       } else {
@@ -668,17 +670,33 @@ export default function CampaignDetailPage() {
         dateRange.endDate,
         userMessage
       );
-      if (response.status === 'success') {
-        const assistantMessage = response.insights || response.analysis || 'Keine Antwort erhalten.';
-        setChatMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
+      if (response.success && response.data) {
+        const analysis = response.data.analysis;
+        if (!analysis) {
+          setChatMessages(prev => [...prev, { role: 'assistant', content: 'Keine Analysedaten erhalten.' }]);
+          return;
+        }
+        const parts: string[] = [];
+        if (analysis.summary) parts.push(analysis.summary);
+        if (analysis.key_insights?.length) {
+          parts.push('\n📊 Wichtige Erkenntnisse:\n' + analysis.key_insights.map((i: string) => `• ${i}`).join('\n'));
+        }
+        if (analysis.recommendations?.length) {
+          parts.push('\n💡 Empfehlungen:\n' + analysis.recommendations.map((r: string) => `• ${r}`).join('\n'));
+        }
+        if (analysis.weak_areas?.length) {
+          parts.push('\n⚠️ Schwachstellen:\n' + analysis.weak_areas.map((w: string) => `• ${w}`).join('\n'));
+        }
+        setChatMessages(prev => [...prev, { role: 'assistant', content: parts.join('\n') || 'Keine Antwort erhalten.' }]);
       } else {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: 'Fehler beim Abrufen der Antwort.' }]);
+        setChatMessages(prev => [...prev, { role: 'assistant', content: response.error || 'Fehler beim Abrufen der Antwort.' }]);
       }
     } catch (err) {
       console.error('Chat error:', err);
       setChatMessages(prev => [...prev, { role: 'assistant', content: 'Ein Fehler ist aufgetreten.' }]);
     } finally {
       setLoadingChat(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     }
   };
 
@@ -1675,7 +1693,7 @@ export default function CampaignDetailPage() {
                     ) : (
                       chatMessages.map((msg, idx) => (
                         <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-xs lg:max-w-md rounded-lg px-4 py-2 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                          <div className={`max-w-xs lg:max-w-md xl:max-w-lg rounded-lg px-4 py-2 text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
                             {msg.content}
                           </div>
                         </div>
@@ -1692,6 +1710,7 @@ export default function CampaignDetailPage() {
                         </div>
                       </div>
                     )}
+                    <div ref={chatEndRef} />
                   </div>
                   {/* Input */}
                   <div className="flex gap-2">
