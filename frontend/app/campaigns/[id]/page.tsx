@@ -169,10 +169,12 @@ export default function CampaignDetailPage() {
     endDate: format(new Date(), 'yyyy-MM-dd'),
   });
   const [comparisonData, setComparisonData] = useState<ComparisonData | null>(null);
+  const [compPrevPeriod, setCompPrevPeriod] = useState<{ start: string; end: string } | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCompareCampaignId, setSelectedCompareCampaignId] = useState<string>('');
   const [compareCampaignKPIs, setCompareCampaignKPIs] = useState<CampaignKPIs | null>(null);
   const [loadingCompareCampaign, setLoadingCompareCampaign] = useState(false);
+  const [loadingComparison, setLoadingComparison] = useState(false);
   const [breakdownData, setBreakdownData] = useState<any[]>([]);
   const [loadingBreakdown, setLoadingBreakdown] = useState(false);
   const [ads, setAds] = useState<any[]>([]);
@@ -301,37 +303,31 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const loadComparisonData = async () => {
+  const loadComparisonData = async (customPrevStart?: string, customPrevEnd?: string) => {
     try {
-      const startDate = dateRange.startDate;
-      const endDate = dateRange.endDate;
-      // Calculate previous period of same length
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const diff = end.getTime() - start.getTime();
-      const prevStart = new Date(start.getTime() - diff);
-      const prevEnd = new Date(end.getTime() - diff);
-      const prevStartStr = format(prevStart, 'yyyy-MM-dd');
-      const prevEndStr = format(prevEnd, 'yyyy-MM-dd');
+      const start = new Date(dateRange.startDate);
+      const end = new Date(dateRange.endDate);
+      const diffMs = end.getTime() - start.getTime();
+      const prevEnd = new Date(start.getTime() - 86400000);
+      const prevStart = new Date(prevEnd.getTime() - diffMs);
+      const prevStartStr = customPrevStart ?? format(prevStart, 'yyyy-MM-dd');
+      const prevEndStr = customPrevEnd ?? format(prevEnd, 'yyyy-MM-dd');
 
-      const response = await getPeriodComparison(
-        startDate,
-        endDate,
-        'custom',
-        'campaign',
-        [campaignId],
-        prevStartStr,
-        prevEndStr
-      );
+      const response = await getEntityKPIs("campaign", campaignId, prevStartStr, prevEndStr);
       if (response.status === 'success' && response.data) {
-        console.log('Comparison data:', response.data);
-        // Assuming response.data contains comparison metrics
-        // If structure is { current: {...}, previous: {...} }, we need to extract previous
-        let previousData = response.data;
-        if (response.data.previous) {
-          previousData = response.data.previous;
-        }
-        setComparisonData(previousData);
+        const d = response.data;
+        setComparisonData({
+          ctr: Number(d.ctr) || 0,
+          cpc: Number(d.cpc) || 0,
+          roas: Number(d.roas) || 0,
+          cvr: Number(d.cvr) || 0,
+          impressions: Number(d.impressions) || 0,
+          clicks: Number(d.clicks) || 0,
+          conversions: Number(d.conversions) || 0,
+          spend: Number(d.spend) || 0,
+          revenue: Number(d.revenue) || 0,
+        });
+        setCompPrevPeriod({ start: prevStartStr, end: prevEndStr });
       }
     } catch (err) {
       console.error('Comparison data load error:', err);
@@ -1606,68 +1602,193 @@ export default function CampaignDetailPage() {
 
           {/* Comparison Tab */}
           <TabsContent value="comparison" className="space-y-6">
+
+            {/* ── Periodenvergleich ── */}
             <Card>
               <CardHeader>
-                <CardTitle>Periodenvergleich</CardTitle>
-                <CardDescription>
-                  Vergleich der aktuellen Periode ({dateRange.startDate} - {dateRange.endDate}) mit der vorherigen Periode
-                </CardDescription>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle>Periodenvergleich</CardTitle>
+                    <CardDescription>
+                      Aktuell: {dateRange.startDate} – {dateRange.endDate}
+                      {compPrevPeriod && (
+                        <span className="ml-2 text-muted-foreground">
+                          vs. {compPrevPeriod.start} – {compPrevPeriod.end}
+                        </span>
+                      )}
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { label: 'Vorwoche', days: 7 },
+                      { label: 'Vormonat', days: 30 },
+                      { label: 'Vorquartal', days: 90 },
+                    ].map(({ label, days }) => (
+                      <Button
+                        key={days}
+                        variant="outline"
+                        size="sm"
+                        disabled={loadingComparison}
+                        onClick={async () => {
+                          setLoadingComparison(true);
+                          const end = new Date(dateRange.startDate);
+                          end.setDate(end.getDate() - 1);
+                          const start = new Date(end);
+                          start.setDate(start.getDate() - days + 1);
+                          await loadComparisonData(
+                            format(start, 'yyyy-MM-dd'),
+                            format(end, 'yyyy-MM-dd')
+                          );
+                          setLoadingComparison(false);
+                        }}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={loadingComparison}
+                      onClick={async () => {
+                        setLoadingComparison(true);
+                        await loadComparisonData();
+                        setLoadingComparison(false);
+                      }}
+                    >
+                      <RefreshCw className={`h-3 w-3 mr-1 ${loadingComparison ? 'animate-spin' : ''}`} />
+                      Vorperiode
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
-                {comparisonData && kpis ? (
+                {loadingComparison ? (
+                  <div className="flex justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : comparisonData && kpis ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>KPI</TableHead>
                         <TableHead>Aktuelle Periode</TableHead>
-                        <TableHead>Vorherige Periode</TableHead>
+                        <TableHead>Vergleichsperiode</TableHead>
                         <TableHead>Veränderung</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell className="font-medium">Spend</TableCell>
-                        <TableCell>€{Number(kpis.spend || 0).toFixed(2)}</TableCell>
-                        <TableCell>€{Number(comparisonData.spend || 0).toFixed(2)}</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.spend || 0, comparisonData.spend || 0))}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-medium">Revenue</TableCell>
-                        <TableCell>€{Number(kpis.revenue || 0).toFixed(2)}</TableCell>
-                        <TableCell>€{Number(comparisonData.revenue || 0).toFixed(2)}</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.revenue || 0, comparisonData.revenue || 0))}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-medium">ROAS</TableCell>
-                        <TableCell>{Number(kpis.roas || 0).toFixed(2)}x</TableCell>
-                        <TableCell>{Number(comparisonData.roas || 0).toFixed(2)}x</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.roas || 0, comparisonData.roas || 0))}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-medium">CTR</TableCell>
-                        <TableCell>{Number(kpis.ctr || 0).toFixed(2)}%</TableCell>
-                        <TableCell>{Number(comparisonData.ctr || 0).toFixed(2)}%</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.ctr || 0, comparisonData.ctr || 0))}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-medium">CPC</TableCell>
-                        <TableCell>€{Number(kpis.cpc || 0).toFixed(2)}</TableCell>
-                        <TableCell>€{Number(comparisonData.cpc || 0).toFixed(2)}</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.cpc || 0, comparisonData.cpc || 0))}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-medium">CVR</TableCell>
-                        <TableCell>{Number(kpis.cvr || 0).toFixed(2)}%</TableCell>
-                        <TableCell>{Number(comparisonData.cvr || 0).toFixed(2)}%</TableCell>
-                        <TableCell>{formatDelta(getDelta(kpis.cvr || 0, comparisonData.cvr || 0))}</TableCell>
-                      </TableRow>
+                      {[
+                        { label: 'Spend', cur: `€${kpis.spend.toFixed(2)}`, prev: `€${comparisonData.spend.toFixed(2)}`, delta: getDelta(kpis.spend, comparisonData.spend), invert: false },
+                        { label: 'Revenue', cur: `€${kpis.revenue.toFixed(2)}`, prev: `€${comparisonData.revenue.toFixed(2)}`, delta: getDelta(kpis.revenue, comparisonData.revenue), invert: false },
+                        { label: 'ROAS', cur: `${kpis.roas.toFixed(2)}x`, prev: `${comparisonData.roas.toFixed(2)}x`, delta: getDelta(kpis.roas, comparisonData.roas), invert: false },
+                        { label: 'CTR', cur: `${kpis.ctr.toFixed(2)}%`, prev: `${comparisonData.ctr.toFixed(2)}%`, delta: getDelta(kpis.ctr, comparisonData.ctr), invert: false },
+                        { label: 'CPC', cur: `€${kpis.cpc.toFixed(2)}`, prev: `€${comparisonData.cpc.toFixed(2)}`, delta: getDelta(kpis.cpc, comparisonData.cpc), invert: true },
+                        { label: 'CVR', cur: `${kpis.cvr.toFixed(2)}%`, prev: `${comparisonData.cvr.toFixed(2)}%`, delta: getDelta(kpis.cvr, comparisonData.cvr), invert: false },
+                        { label: 'Clicks', cur: kpis.clicks.toLocaleString(), prev: comparisonData.clicks.toLocaleString(), delta: getDelta(kpis.clicks, comparisonData.clicks), invert: false },
+                        { label: 'Impressions', cur: kpis.impressions.toLocaleString(), prev: comparisonData.impressions.toLocaleString(), delta: getDelta(kpis.impressions, comparisonData.impressions), invert: false },
+                        { label: 'Conversions', cur: kpis.conversions.toLocaleString(), prev: comparisonData.conversions.toLocaleString(), delta: getDelta(kpis.conversions, comparisonData.conversions), invert: false },
+                      ].map(({ label, cur, prev, delta, invert }) => {
+                        const isPositive = delta !== null && (invert ? delta < 0 : delta > 0);
+                        const isNegative = delta !== null && (invert ? delta > 0 : delta < 0);
+                        return (
+                          <TableRow key={label}>
+                            <TableCell className="font-medium">{label}</TableCell>
+                            <TableCell>{cur}</TableCell>
+                            <TableCell className="text-muted-foreground">{prev}</TableCell>
+                            <TableCell className={isPositive ? 'text-green-600 font-medium' : isNegative ? 'text-red-500 font-medium' : ''}>
+                              {formatDelta(delta)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 ) : (
-                  <p>Keine Vergleichsdaten verfügbar.</p>
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p className="mb-3">Keine Vergleichsdaten geladen.</p>
+                    <Button variant="outline" onClick={async () => { setLoadingComparison(true); await loadComparisonData(); setLoadingComparison(false); }}>
+                      <RefreshCw className="h-4 w-4 mr-2" />Vorperiode laden
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
+
+            {/* ── Kampagnenvergleich ── */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Kampagnenvergleich</CardTitle>
+                <CardDescription>Vergleiche diese Kampagne mit einer anderen im gleichen Zeitraum</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-3 items-center">
+                  <Select
+                    value={selectedCompareCampaignId}
+                    onValueChange={setSelectedCompareCampaignId}
+                  >
+                    <SelectTrigger className="w-72">
+                      <SelectValue placeholder="Kampagne auswählen…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {campaigns.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedCompareCampaignId && (
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedCompareCampaignId('')}>
+                      Zurücksetzen
+                    </Button>
+                  )}
+                </div>
+
+                {loadingCompareCampaign ? (
+                  <div className="flex justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : compareCampaignKPIs && kpis ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>KPI</TableHead>
+                        <TableHead>{campaign?.name ?? 'Diese Kampagne'}</TableHead>
+                        <TableHead>{campaigns.find(c => c.id === selectedCompareCampaignId)?.name ?? 'Vergleichskampagne'}</TableHead>
+                        <TableHead>Differenz</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[
+                        { label: 'Spend', a: kpis.spend, b: compareCampaignKPIs.spend, fmt: (v: number) => `€${v.toFixed(2)}`, invert: false },
+                        { label: 'Revenue', a: kpis.revenue, b: compareCampaignKPIs.revenue, fmt: (v: number) => `€${v.toFixed(2)}`, invert: false },
+                        { label: 'ROAS', a: kpis.roas, b: compareCampaignKPIs.roas, fmt: (v: number) => `${v.toFixed(2)}x`, invert: false },
+                        { label: 'CTR', a: kpis.ctr, b: compareCampaignKPIs.ctr, fmt: (v: number) => `${v.toFixed(2)}%`, invert: false },
+                        { label: 'CPC', a: kpis.cpc, b: compareCampaignKPIs.cpc, fmt: (v: number) => `€${v.toFixed(2)}`, invert: true },
+                        { label: 'CVR', a: kpis.cvr, b: compareCampaignKPIs.cvr, fmt: (v: number) => `${v.toFixed(2)}%`, invert: false },
+                        { label: 'Clicks', a: kpis.clicks, b: compareCampaignKPIs.clicks, fmt: (v: number) => v.toLocaleString(), invert: false },
+                        { label: 'Conversions', a: kpis.conversions, b: compareCampaignKPIs.conversions, fmt: (v: number) => v.toLocaleString(), invert: false },
+                      ].map(({ label, a, b, fmt, invert }) => {
+                        const delta = getDelta(a, b);
+                        const isPositive = delta !== null && (invert ? delta < 0 : delta > 0);
+                        const isNegative = delta !== null && (invert ? delta > 0 : delta < 0);
+                        return (
+                          <TableRow key={label}>
+                            <TableCell className="font-medium">{label}</TableCell>
+                            <TableCell>{fmt(a)}</TableCell>
+                            <TableCell>{fmt(b)}</TableCell>
+                            <TableCell className={isPositive ? 'text-green-600 font-medium' : isNegative ? 'text-red-500 font-medium' : ''}>
+                              {formatDelta(delta)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                ) : !selectedCompareCampaignId ? (
+                  <p className="text-muted-foreground text-sm">Wähle eine Kampagne aus um den Vergleich zu starten.</p>
+                ) : null}
+              </CardContent>
+            </Card>
+
           </TabsContent>
 
           {/* Chat Tab */}
