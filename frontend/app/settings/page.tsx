@@ -150,8 +150,8 @@ export default function SettingsPage() {
       setError(null);
       
       const [providersRes, configsRes, statusRes, metaAdsStatusRes] = await Promise.all([
-        getLLMProviders(),
-        getLLMConfigs(),
+        getLLMProviders().catch(() => null),
+        getLLMConfigs().catch(() => null),
         getLLMGatewayStatus().catch(() => null),
         getMetaAdsStatus().catch(() => null),
       ]);
