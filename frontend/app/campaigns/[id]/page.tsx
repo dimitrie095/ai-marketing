@@ -428,9 +428,8 @@ export default function CampaignDetailPage() {
       const response = await exportAnalytics(
         dateRange.startDate,
         dateRange.endDate,
-        'campaign',
-        [campaignId],
-        'csv'
+        'csv',
+        [campaignId]
       );
       if (response.status === 'success' && response.data) {
         // Assuming response.data contains a URL or file content

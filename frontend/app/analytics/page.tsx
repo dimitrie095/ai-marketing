@@ -469,7 +469,12 @@ export default function AnalyticsPage() {
             'Reduzieren Sie das Budget temporär um **15%**',
             'Testen Sie neue Placements (**Instagram Reels**)'
           ],
-          analysis_details: 'Die Analyse zeigt einen **signifikanten** Anstieg der Kosten pro Klick um **23%** im Vergleich zur Vorwoche.'
+          analysis_details: 'Die Analyse zeigt einen **signifikanten** Anstieg der Kosten pro Klick um **23%** im Vergleich zur Vorwoche.',
+          current_value: 2.45,
+          previous_value: 1.99,
+          change_percentage: 23.1,
+          period_current: '2025-03-01 - 2025-03-07',
+          period_previous: '2025-02-22 - 2025-02-28',
         };
         const transformed = transformRootCauseResult(
           demoData,
@@ -494,7 +499,12 @@ export default function AnalyticsPage() {
           'Testen Sie neue Creatives mit **frischen Bildern**',
           'Erweitern Sie das Targeting auf **ähnliche Audiences**'
         ],
-        analysis_details: 'Demo-Analyse: Die Kosten pro Klick sind **gestiegen**.'
+        analysis_details: 'Demo-Analyse: Die Kosten pro Klick sind **gestiegen**.',
+        current_value: 2.30,
+        previous_value: 1.85,
+        change_percentage: 24.3,
+        period_current: '2025-03-01 - 2025-03-07',
+        period_previous: '2025-02-22 - 2025-02-28',
       };
       const transformed = transformRootCauseResult(
         demoData,
@@ -506,6 +516,45 @@ export default function AnalyticsPage() {
       setRootCauseResult(transformed);
     } finally {
       setAnalysisLoading(false);
+    }
+  };
+
+  const handleSaveAnalysis = async () => {
+    if (!rootCauseResult) return;
+    try {
+      // Prepare analysis data for saving
+      const analysisData = {
+        ...rootCauseResult.backend_data || rootCauseResult,
+        campaign_id: rootCauseResult.campaign_id,
+        metric_name: rootCauseResult.metric_name || selectedMetricForAnalysis,
+        period_current: rootCauseResult.period_current || rootCauseResult.period,
+        period_previous: rootCauseResult.period_previous,
+        current_value: rootCauseResult.current_value,
+        previous_value: rootCauseResult.previous_value,
+        change_percentage: rootCauseResult.change_percentage,
+        problem_summary: rootCauseResult.problem_summary,
+        likely_causes: rootCauseResult.likely_causes,
+        evidence: rootCauseResult.evidence,
+        validation_steps: rootCauseResult.validation_steps,
+        priority_action: rootCauseResult.priority_action,
+        confidence: rootCauseResult.confidence_score || rootCauseResult.confidence,
+      };
+      // Save to database
+      await saveAnalysisResult(analysisData);
+      // Download as JSON
+      const dataStr = JSON.stringify(rootCauseResult, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = window.URL.createObjectURL(dataBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analysis_${rootCauseResult.campaign_id}_${rootCauseResult.metric_name}_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to save/download analysis:', error);
+      setError('Speichern/Download fehlgeschlagen');
     }
   };
 
@@ -1237,7 +1286,7 @@ export default function AnalyticsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-end">
+                  <div className="flex items-end gap-2">
                     <Button 
                       onClick={runRootCauseAnalysis} 
                       disabled={analysisLoading || !selectedCampaign}
@@ -1254,6 +1303,15 @@ export default function AnalyticsPage() {
                           Analyse starten
                         </>
                       )}
+                    </Button>
+                    <Button
+                      onClick={handleSaveAnalysis}
+                      disabled={!rootCauseResult}
+                      variant="outline"
+                      className="mb-0"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Speichern & Download
                     </Button>
                   </div>
                 </div>
