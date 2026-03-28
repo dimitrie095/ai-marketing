@@ -811,7 +811,7 @@ export default function CampaignDetailPage() {
   };
 
   const formatDelta = (delta: number | null) => {
-    if (delta === null) return null;
+    if (delta === null) return undefined;
     const sign = delta >= 0 ? '+' : '';
     return `${sign}${delta.toFixed(1)}%`;
   };

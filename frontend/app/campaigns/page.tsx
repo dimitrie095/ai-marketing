@@ -67,8 +67,11 @@ interface CampaignWithMetrics extends Campaign {
   total_spend: number;
   total_revenue: number;
   ad_sets_count: number;
+  clicks?: number;
+  impressions?: number;
   ctr?: number;
   roas?: number;
+  version?: number;
 }
 
 function CampaignsPage() {

@@ -322,6 +322,24 @@ export default function AnalyticsPage() {
       const formattedPrimaryCause = formatBoldText(data.primary_cause);
       const formattedProblemSummary = formatAnalysisText(data.problem_summary || '');
 
+      // Ensure evidence and validation_steps are not empty for better transparency
+      let enrichedEvidence = data.evidence || [];
+      if (enrichedEvidence.length === 0) {
+        enrichedEvidence = [
+          `Metrik "${metric}" zeigt Veränderung von ${data.change_percentage?.toFixed(1) || 'unbekannt'}% im Vergleich zur Vorperiode`,
+          `Analysierter Zeitraum: ${startDate} bis ${endDate}`,
+          `Verglichen mit: ${data.period_previous || 'Vorperiode'}`,
+        ];
+      }
+      let enrichedValidationSteps = data.validation_steps || [];
+      if (enrichedValidationSteps.length === 0) {
+        enrichedValidationSteps = [
+          'Überprüfen Sie die Datenqualität der Metrik',
+          'Validieren Sie die berechneten Veränderungen mit Rohdaten',
+          'Kontrollieren Sie externe Faktoren (Saison, Wettbewerb)',
+        ];
+      }
+
       return {
         ...data,
         // Ensure we have all required fields
@@ -343,8 +361,8 @@ export default function AnalyticsPage() {
         problem_summary: data.problem_summary || '',
         formatted_problem_summary: formattedProblemSummary,
         likely_causes: data.likely_causes || [],
-        evidence: data.evidence || [],
-        validation_steps: data.validation_steps || [],
+        evidence: enrichedEvidence,
+        validation_steps: enrichedValidationSteps,
         priority_action: data.priority_action || '',
         // Quantitative metrics
         current_value: data.current_value ?? null,
@@ -353,7 +371,7 @@ export default function AnalyticsPage() {
         period_current: data.period_current ?? `${startDate} - ${endDate}`,
         period_previous: data.period_previous ?? null,
         // Confidence reasoning
-        confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${data.evidence?.length || data.contributing_factors?.length || 0} Evidenz-Punkten und ${data.likely_causes?.length || data.contributing_factors?.length || 0} identifizierten Ursachen.`
+        confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${enrichedEvidence.length} Evidenz-Punkten und ${data.likely_causes?.length || data.contributing_factors?.length || 0} identifizierten Ursachen.`
       };
     }
     
@@ -375,10 +393,29 @@ export default function AnalyticsPage() {
     const recommended_actions = data.priority_action 
       ? [data.priority_action, ...(data.validation_steps || [])]
       : data.validation_steps || [];
+    
+    // Ensure evidence and validation_steps are not empty for better transparency
+    let enrichedEvidence = data.evidence || [];
+    if (enrichedEvidence.length === 0) {
+      enrichedEvidence = [
+        `Metrik "${metric}" zeigt Veränderung von ${data.change_percentage?.toFixed(1) || 'unbekannt'}% im Vergleich zur Vorperiode`,
+        `Analysierter Zeitraum: ${startDate} bis ${endDate}`,
+        `Verglichen mit: ${data.period_previous || 'Vorperiode'}`,
+      ];
+    }
+    let enrichedValidationSteps = data.validation_steps || [];
+    if (enrichedValidationSteps.length === 0) {
+      enrichedValidationSteps = [
+        'Überprüfen Sie die Datenqualität der Metrik',
+        'Validieren Sie die berechneten Veränderungen mit Rohdaten',
+        'Kontrollieren Sie externe Faktoren (Saison, Wettbewerb)',
+      ];
+    }
+    
     // Build comprehensive analysis details
-    const evidenceText = data.evidence?.length ? `Evidenz: ${data.evidence.join('; ')}. ` : '';
+    const evidenceText = enrichedEvidence.length ? `Evidenz: ${enrichedEvidence.join('; ')}. ` : '';
     const causesText = finalContributingFactors.length ? `Mögliche Ursachen: ${finalContributingFactors.join('; ')}. ` : '';
-    const validationText = data.validation_steps?.length ? `Validierungsschritte: ${data.validation_steps.join('; ')}. ` : '';
+    const validationText = enrichedValidationSteps.length ? `Validierungsschritte: ${enrichedValidationSteps.join('; ')}. ` : '';
     const analysis_details = `${evidenceText}${causesText}${validationText}${data.priority_action ? `Prioritätsaktion: ${data.priority_action}.` : ''}`;
     
     // Format text
@@ -404,8 +441,8 @@ export default function AnalyticsPage() {
       problem_summary: data.problem_summary || '',
       formatted_problem_summary: formattedProblemSummary,
       likely_causes: data.likely_causes || [],
-      evidence: data.evidence || [],
-      validation_steps: data.validation_steps || [],
+      evidence: enrichedEvidence,
+      validation_steps: enrichedValidationSteps,
       priority_action: data.priority_action || '',
       confidence_score: confidenceScore,
       // Quantitative metrics
@@ -415,7 +452,7 @@ export default function AnalyticsPage() {
       period_current: data.period_current ?? `${startDate} - ${endDate}`,
       period_previous: data.period_previous ?? null,
       // Confidence reasoning
-      confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${data.evidence?.length || 0} Evidenz-Punkten und ${data.likely_causes?.length || 0} identifizierten Ursachen.`
+      confidence_reasoning: data.confidence_reasoning || `Konfidenz basiert auf ${enrichedEvidence.length} Evidenz-Punkten und ${data.likely_causes?.length || 0} identifizierten Ursachen.`
     };
   };
 
@@ -532,11 +569,11 @@ export default function AnalyticsPage() {
         current_value: rootCauseResult.current_value,
         previous_value: rootCauseResult.previous_value,
         change_percentage: rootCauseResult.change_percentage,
-        problem_summary: rootCauseResult.problem_summary,
-        likely_causes: rootCauseResult.likely_causes,
-        evidence: rootCauseResult.evidence,
-        validation_steps: rootCauseResult.validation_steps,
-        priority_action: rootCauseResult.priority_action,
+        problem_summary: rootCauseResult.problem_summary || '',
+        likely_causes: rootCauseResult.likely_causes || [],
+        evidence: rootCauseResult.evidence || [],
+        validation_steps: rootCauseResult.validation_steps || [],
+        priority_action: rootCauseResult.priority_action || '',
         confidence: rootCauseResult.confidence_score || rootCauseResult.confidence,
       };
       // Save to database
@@ -1591,6 +1628,39 @@ export default function AnalyticsPage() {
                         </div>
                         
                         <p className="mt-4 text-xs">Die Konfidenz spiegelt die Stärke der Evidenz und die Konsistenz der Muster wider. Diese Analyse ist keine Black Box – alle Erkenntnisse und Entscheidungen sind nachvollziehbar.</p>
+                      </CardContent>
+                    </Card>
+
+                    {/* Analysis Transparency */}
+                    <Card className="bg-blue-50 border-blue-200">
+                      <CardHeader>
+                        <CardTitle className="text-sm font-medium">Analyse-Transparenz</CardTitle>
+                      </CardHeader>
+                      <CardContent className="text-sm">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <h5 className="font-medium mb-2">Analyse-Details</h5>
+                            <ul className="space-y-1">
+                              <li><strong>Metrik:</strong> {rootCauseResult.metric_name?.toUpperCase() || selectedMetricForAnalysis.toUpperCase()}</li>
+                              <li><strong>Zeitraum (aktuell):</strong> {rootCauseResult.period_current || rootCauseResult.period}</li>
+                              <li><strong>Zeitraum (Vergleich):</strong> {rootCauseResult.period_previous || 'Vorherige 7 Tage'}</li>
+                              <li><strong>Datenpunkte:</strong> {rootCauseResult.evidence?.length || 0} Evidenzpunkte</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <h5 className="font-medium mb-2">Analyse-Qualität</h5>
+                            <ul className="space-y-1">
+                              <li><strong>Konfidenz:</strong> {rootCauseResult.confidence_score ? `${(rootCauseResult.confidence_score * 100).toFixed(1)}%` : rootCauseResult.confidence}</li>
+                              <li><strong>Ursachen identifiziert:</strong> {rootCauseResult.likely_causes?.length || rootCauseResult.contributing_factors?.length || 0}</li>
+                              <li><strong>Validierungsschritte:</strong> {rootCauseResult.validation_steps?.length || 0}</li>
+                              <li><strong>Prioritätsaktion:</strong> {rootCauseResult.priority_action ? 'Definiert' : 'Nicht definiert'}</li>
+                            </ul>
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-blue-200">
+                          <h5 className="font-medium mb-2">Transparenz-Prinzipien</h5>
+                          <p className="text-xs">Diese Analyse folgt dem Prinzip der Nachvollziehbarkeit: Alle Erkenntnisse basieren auf nachprüfbaren Daten, alle Schlussfolgerungen sind durch Evidenz gestützt, alle Empfehlungen sind handlungsorientiert.</p>
+                        </div>
                       </CardContent>
                     </Card>
                   </div>

@@ -1122,9 +1122,35 @@ async def save_analysis_result(
     Save root cause analysis result to database
     """
     try:
+        # Ensure Beanie is initialized
+        from app.db.session import init_beanie_if_needed, _models_initialized
+        if not _models_initialized:
+            await init_beanie_if_needed()
+        
         # Generate unique analysis ID
         from datetime import datetime
-        analysis_id = f"analysis_{datetime.utcnow().timestamp()}_{hash(str(analysis_data))[:8]}"
+        import uuid
+        analysis_id = f"analysis_{datetime.utcnow().timestamp()}_{str(uuid.uuid4())[:8]}"
+        
+        # Normalize data for Beanie model
+        likely_causes = analysis_data.get("likely_causes", [])
+        if likely_causes and isinstance(likely_causes, list) and len(likely_causes) > 0:
+            normalized_likely_causes = []
+            for item in likely_causes:
+                if isinstance(item, dict):
+                    normalized_likely_causes.append(item)
+                else:
+                    # Convert string to dict with a "cause" field
+                    normalized_likely_causes.append({"cause": str(item)})
+            likely_causes = normalized_likely_causes
+        
+        evidence = analysis_data.get("evidence", [])
+        if evidence and isinstance(evidence, list):
+            evidence = [str(item) for item in evidence]
+        
+        validation_steps = analysis_data.get("validation_steps", [])
+        if validation_steps and isinstance(validation_steps, list):
+            validation_steps = [str(item) for item in validation_steps]
         
         # Create AnalysisResult document
         from app.db.models import AnalysisResult
@@ -1138,9 +1164,9 @@ async def save_analysis_result(
             previous_value=analysis_data.get("previous_value"),
             change_percentage=analysis_data.get("change_percentage"),
             problem_summary=analysis_data.get("problem_summary"),
-            likely_causes=analysis_data.get("likely_causes", []),
-            evidence=analysis_data.get("evidence", []),
-            validation_steps=analysis_data.get("validation_steps", []),
+            likely_causes=likely_causes,
+            evidence=evidence,
+            validation_steps=validation_steps,
             priority_action=analysis_data.get("priority_action"),
             confidence=analysis_data.get("confidence", 0.5),
         )
@@ -1149,10 +1175,10 @@ async def save_analysis_result(
         return {"status": "success", "data": {"analysis_id": analysis_id}}
         
     except Exception as e:
-        import logging
+        import logging, traceback
         logger = logging.getLogger(__name__)
-        logger.error(f"Failed to save analysis result: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save analysis result: {str(e)}")
+        logger.error(f"Failed to save analysis result: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save analysis result: {str(e)}\n{traceback.format_exc()}")
 
 
 def calculate_period_changes(current: dict, compare: dict) -> dict:

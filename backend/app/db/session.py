@@ -34,7 +34,7 @@ async def init_beanie_if_needed():
     
     try:
         from beanie import init_beanie
-        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport, User
+        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport, User, AnalysisResult
         from .models_llm import LLMProvider, LLMConfig, Conversation, Message, SyncJob, PromptTemplate
         
         # Initialize Beanie with all document models
@@ -55,7 +55,8 @@ async def init_beanie_if_needed():
                 Message,
                 SyncJob,
                 PromptTemplate,
-                User
+                User,
+                AnalysisResult
             ]
         )
         print("[OK] Beanie ODM initialized successfully")
