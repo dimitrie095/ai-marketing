@@ -69,29 +69,64 @@ async def get_entity_kpis(
 async def get_kpi_trend(
     entity_type: str = Query(..., pattern="^(campaign|adset|ad)$", description="Entity Typ"),
     entity_id: str = Query(..., description="Entity ID"),
-    kpi_name: str = Query(..., pattern="^(ctr|cpc|roas|cvr|rpm|roi|spend|revenue)$", description="KPI Name"),
+    kpi_name: str = Query(..., pattern="^(ctr|cpc|roas|cvr|rpm|roi|spend|revenue|clicks|impressions)$", description="KPI Name"),
     start_date: date = Query(..., description="Start Datum (YYYY-MM-DD)"),
     end_date: date = Query(..., description="End Datum (YYYY-MM-DD)"),
     db=Depends(get_db)
 ):
     """
     Holt tägliche Trend-Daten für einen bestimmten KPI
-    
+
     Beispiel:
     ```
     GET /api/v1/kpi/trend?entity_type=campaign&entity_id=123456&kpi_name=ctr&start_date=2025-01-01&end_date=2025-01-31
     ```
     """
     if not DB_AVAILABLE:
-        # Generate mock trend data
         import random
         from datetime import timedelta
         data = []
         current = start_date
         while current <= end_date:
+            impressions = random.randint(2000, 8000)
+            clicks = random.randint(60, 400)
+            spend = round(random.uniform(80, 600), 2)
+            revenue = round(random.uniform(150, 1200), 2)
+            conversions = random.randint(2, 30)
+
+            if kpi_name == "ctr":
+                value = round(clicks / impressions * 100, 2)
+            elif kpi_name == "cpc":
+                value = round(spend / clicks, 2) if clicks else 0.0
+            elif kpi_name == "roas":
+                value = round(revenue / spend, 2) if spend else 0.0
+            elif kpi_name == "cvr":
+                value = round(conversions / clicks * 100, 2) if clicks else 0.0
+            elif kpi_name == "rpm":
+                value = round(revenue / impressions * 1000, 2) if impressions else 0.0
+            elif kpi_name == "roi":
+                value = round((revenue - spend) / spend * 100, 2) if spend else 0.0
+            elif kpi_name == "spend":
+                value = spend
+            elif kpi_name == "revenue":
+                value = revenue
+            elif kpi_name == "clicks":
+                value = float(clicks)
+            elif kpi_name == "impressions":
+                value = float(impressions)
+            else:
+                value = 0.0
+
             data.append({
                 "date": current.isoformat(),
-                "value": round(random.uniform(1.5, 4.5), 2)
+                "value": value,
+                "raw_metrics": {
+                    "impressions": impressions,
+                    "clicks": clicks,
+                    "conversions": conversions,
+                    "spend": spend,
+                    "revenue": revenue,
+                },
             })
             current += timedelta(days=1)
         return {

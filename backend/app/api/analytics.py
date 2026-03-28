@@ -475,6 +475,46 @@ async def get_metrics_breakdown(
                 "clicks": [random.randint(20, 200) for _ in range(num_points)]
             }
         }
+    elif group_by == "ad":
+        n = 6
+        spends   = [round(random.uniform(80, 500), 2) for _ in range(n)]
+        revenues = [round(random.uniform(200, 1500), 2) for _ in range(n)]
+        clicks_l = [random.randint(30, 300) for _ in range(n)]
+        impr_l   = [random.randint(1000, 8000) for _ in range(n)]
+        conv_l   = [random.randint(1, 40) for _ in range(n)]
+        breakdown = {
+            "categories": [f"Ad {i+1}" for i in range(n)],
+            "data": {
+                "spend":       spends,
+                "revenue":     revenues,
+                "roas":        [round(revenues[i] / spends[i], 2) if spends[i] else 0 for i in range(n)],
+                "ctr":         [round(clicks_l[i] / impr_l[i] * 100, 2) if impr_l[i] else 0 for i in range(n)],
+                "cpc":         [round(spends[i] / clicks_l[i], 2) if clicks_l[i] else 0 for i in range(n)],
+                "clicks":      clicks_l,
+                "impressions": impr_l,
+                "conversions": conv_l,
+            }
+        }
+    elif group_by == "adset":
+        n = 4
+        spends   = [round(random.uniform(150, 800), 2) for _ in range(n)]
+        revenues = [round(random.uniform(400, 2400), 2) for _ in range(n)]
+        clicks_l = [random.randint(60, 500) for _ in range(n)]
+        impr_l   = [random.randint(2000, 15000) for _ in range(n)]
+        conv_l   = [random.randint(3, 60) for _ in range(n)]
+        breakdown = {
+            "categories": [f"AdSet {i+1}" for i in range(n)],
+            "data": {
+                "spend":       spends,
+                "revenue":     revenues,
+                "roas":        [round(revenues[i] / spends[i], 2) if spends[i] else 0 for i in range(n)],
+                "ctr":         [round(clicks_l[i] / impr_l[i] * 100, 2) if impr_l[i] else 0 for i in range(n)],
+                "cpc":         [round(spends[i] / clicks_l[i], 2) if clicks_l[i] else 0 for i in range(n)],
+                "clicks":      clicks_l,
+                "impressions": impr_l,
+                "conversions": conv_l,
+            }
+        }
     else:
         breakdown = {
             "categories": [f"Gruppe {i+1}" for i in range(5)],

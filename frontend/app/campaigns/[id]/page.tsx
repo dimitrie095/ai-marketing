@@ -373,10 +373,24 @@ export default function CampaignDetailPage() {
         'ad',
         [campaignId]
       );
-      if (response.status === 'success' && response.data) {
-        // response.data should be an array of ad-level metrics
-        console.log('Breakdown data:', response.data);
-        setBreakdownData(response.data);
+      if (response.status === 'success' && response.breakdown) {
+        const { categories, data } = response.breakdown as {
+          categories: string[];
+          data: Record<string, number[]>;
+        };
+        const rows = categories.map((name: string, i: number) => ({
+          id: `ad_${i}`,
+          name,
+          spend: data.spend?.[i] ?? 0,
+          revenue: data.revenue?.[i] ?? 0,
+          roas: data.roas?.[i] ?? (data.spend?.[i] ? (data.revenue?.[i] ?? 0) / data.spend[i] : 0),
+          ctr: data.ctr?.[i] ?? 0,
+          cpc: data.cpc?.[i] ?? 0,
+          clicks: data.clicks?.[i] ?? 0,
+          impressions: data.impressions?.[i] ?? 0,
+          conversions: data.conversions?.[i] ?? 0,
+        }));
+        setBreakdownData(rows);
       }
     } catch (err) {
       console.error('Breakdown data load error:', err);
@@ -696,6 +710,17 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const trendMetricConfig: Record<string, { label: string; color: string; formatter: (v: any) => string }> = {
+    spend:       { label: 'Ausgaben (€)',   color: '#ef4444', formatter: (v) => `€${Number(v).toFixed(2)}` },
+    revenue:     { label: 'Umsatz (€)',     color: '#10b981', formatter: (v) => `€${Number(v).toFixed(2)}` },
+    roas:        { label: 'ROAS',           color: '#3b82f6', formatter: (v) => `${Number(v).toFixed(2)}x` },
+    ctr:         { label: 'CTR (%)',        color: '#f59e0b', formatter: (v) => `${Number(v).toFixed(2)}%` },
+    cpc:         { label: 'CPC (€)',        color: '#8b5cf6', formatter: (v) => `€${Number(v).toFixed(2)}` },
+    cvr:         { label: 'CVR (%)',        color: '#ec4899', formatter: (v) => `${Number(v).toFixed(2)}%` },
+    clicks:      { label: 'Klicks',         color: '#3b82f6', formatter: (v) => Number(v).toLocaleString() },
+    impressions: { label: 'Impressionen',   color: '#8b5cf6', formatter: (v) => Number(v).toLocaleString() },
+  };
+
   const loadTrendData = async () => {
     try {
       const startDate = dateRange.startDate;
@@ -703,12 +728,16 @@ export default function CampaignDetailPage() {
       const metric = selectedTrendMetric;
 
       const response = await getKPITrend("campaign", campaignId, metric, startDate, endDate);
-      if (response.status === 'success' && response.data?.trend) {
-        const trend = response.data.trend;
-        // Convert to array of { date, [metric]: value }
-        const converted = trend.map((item: any) => ({
+      if (response.status === 'success' && response.data) {
+        const data = response.data as Array<{ date: string; value: number; raw_metrics?: any }>;
+        const converted = data.map((item) => ({
           date: item.date,
-          [metric]: item.value || 0,
+          [metric]: item.value ?? 0,
+          clicks: item.raw_metrics?.clicks ?? 0,
+          impressions: item.raw_metrics?.impressions ?? 0,
+          conversions: item.raw_metrics?.conversions ?? 0,
+          spend: item.raw_metrics?.spend ?? (metric === 'spend' ? item.value : 0),
+          revenue: item.raw_metrics?.revenue ?? (metric === 'revenue' ? item.value : 0),
         }));
         setTrendData(converted);
       }
@@ -866,6 +895,13 @@ export default function CampaignDetailPage() {
       </Badge>
     );
   };
+
+  // Reload trend data when selected metric changes
+  useEffect(() => {
+    if (campaignId && dateRange.startDate && dateRange.endDate && !loading) {
+      loadTrendData();
+    }
+  }, [selectedTrendMetric]);
 
   // Load comparison campaign KPIs when selection changes
   useEffect(() => {
@@ -1342,13 +1378,17 @@ export default function CampaignDetailPage() {
 
           {/* Performance Tab */}
           <TabsContent value="performance" className="space-y-6">
+            {/* Metric Trend Chart */}
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
-                  <CardTitle>Trend Chart</CardTitle>
+                  <div>
+                    <CardTitle>Trend: {trendMetricConfig[selectedTrendMetric]?.label ?? selectedTrendMetric}</CardTitle>
+                    <CardDescription>Tägliche Entwicklung über den gewählten Zeitraum</CardDescription>
+                  </div>
                   <Select value={selectedTrendMetric} onValueChange={setSelectedTrendMetric}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Select metric" />
+                    <SelectTrigger className="w-44">
+                      <SelectValue placeholder="Metrik wählen" />
                     </SelectTrigger>
                     <SelectContent>
                       {trendMetricsOptions.map(option => (
@@ -1359,60 +1399,73 @@ export default function CampaignDetailPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <CardDescription>Entwicklung über den gewählten Zeitraum</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="date" 
-                      tickFormatter={(date) => format(new Date(date), "dd.MM.", { locale: de })}
-                    />
-                    <YAxis />
-                    <Tooltip formatter={(value: any) => `€${Number(value).toFixed(2)}`} />
-                    <Legend />
-                    <Area
-                      type="monotone"
-                      dataKey="spend"
-                      name="Ausgaben"
-                      stroke="#ef4444"
-                      fill="#ef4444"
-                      fillOpacity={0.3}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      name="Umsatz"
-                      stroke="#10b981"
-                      fill="#10b981"
-                      fillOpacity={0.3}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                {trendData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                    <BarChart3 className="h-10 w-10 mb-3 opacity-40" />
+                    <p>Keine Trenddaten verfügbar.</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={trendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d) => format(new Date(d), "dd.MM.", { locale: de })}
+                      />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value: any) =>
+                          trendMetricConfig[selectedTrendMetric]?.formatter(value) ?? value
+                        }
+                        labelFormatter={(label) => format(new Date(label), "dd. MMM yyyy", { locale: de })}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey={selectedTrendMetric}
+                        name={trendMetricConfig[selectedTrendMetric]?.label ?? selectedTrendMetric}
+                        stroke={trendMetricConfig[selectedTrendMetric]?.color ?? '#6366f1'}
+                        fill={trendMetricConfig[selectedTrendMetric]?.color ?? '#6366f1'}
+                        fillOpacity={0.25}
+                        dot={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
 
+            {/* Klicks & Impressionen */}
             <Card>
               <CardHeader>
                 <CardTitle>Klicks & Impressionen</CardTitle>
+                <CardDescription>Tägliches Volumen</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="date" 
-                      tickFormatter={(date) => format(new Date(date), "dd.MM.", { locale: de })}
-                    />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip />
-                    <Legend />
-                    <Bar yAxisId="left" dataKey="clicks" name="Klicks" fill="#3b82f6" />
-                    <Bar yAxisId="right" dataKey="impressions" name="Impressionen" fill="#8b5cf6" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {trendData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                    <BarChart3 className="h-10 w-10 mb-3 opacity-40" />
+                    <p>Keine Daten verfügbar.</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={trendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d) => format(new Date(d), "dd.MM.", { locale: de })}
+                      />
+                      <YAxis yAxisId="left" />
+                      <YAxis yAxisId="right" orientation="right" />
+                      <Tooltip labelFormatter={(label) => format(new Date(label), "dd. MMM yyyy", { locale: de })} />
+                      <Legend />
+                      <Bar yAxisId="left" dataKey="clicks" name="Klicks" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                      <Bar yAxisId="right" dataKey="impressions" name="Impressionen" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
 

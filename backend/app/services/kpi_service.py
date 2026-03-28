@@ -125,6 +125,10 @@ class KPIService:
                     kpi_value = metric.spend
                 elif kpi_name == "revenue":
                     kpi_value = metric.revenue
+                elif kpi_name == "clicks":
+                    kpi_value = metric.clicks
+                elif kpi_name == "impressions":
+                    kpi_value = metric.impressions
                 
                 trend_data.append({
                     "date": metric.date.isoformat(),
