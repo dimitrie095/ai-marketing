@@ -579,16 +579,16 @@ export default function AnalyticsPage() {
                           <div>
                             <p className="font-medium">{campaign.name}</p>
                             <p className="text-sm text-muted-foreground">
-                              {campaign.impressions.toLocaleString()} Impr.
+                              {(campaign.impressions ?? 0).toLocaleString()} Impr.
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className={`font-bold ${campaign.roas >= 2 ? 'text-green-600' : campaign.roas >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
-                            {campaign.roas.toFixed(2)}x
+                          <p className={`font-bold ${(campaign.roas ?? 0) >= 2 ? 'text-green-600' : (campaign.roas ?? 0) >= 1 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {(campaign.roas ?? 0).toFixed(2)}x
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            €{campaign.revenue.toFixed(0)}
+                            €{(campaign.revenue ?? 0).toFixed(0)}
                           </p>
                         </div>
                       </div>
@@ -763,15 +763,15 @@ export default function AnalyticsPage() {
                               {campaign.status}
                             </Badge>
                           </td>
-                          <td className="text-right">€{campaign.spend.toFixed(2)}</td>
-                          <td className="text-right">€{campaign.revenue.toFixed(2)}</td>
+                          <td className="text-right">€{(campaign.spend ?? 0).toFixed(2)}</td>
+                          <td className="text-right">€{(campaign.revenue ?? 0).toFixed(2)}</td>
                           <td className="text-right">
-                            <span className={campaign.roas >= 2 ? 'text-green-600 font-bold' : campaign.roas >= 1 ? 'text-yellow-600' : 'text-red-600'}>
-                              {campaign.roas.toFixed(2)}x
+                            <span className={(campaign.roas ?? 0) >= 2 ? 'text-green-600 font-bold' : (campaign.roas ?? 0) >= 1 ? 'text-yellow-600' : 'text-red-600'}>
+                              {(campaign.roas ?? 0).toFixed(2)}x
                             </span>
                           </td>
-                          <td className="text-right">{campaign.ctr.toFixed(2)}%</td>
-                          <td className="text-right">{campaign.conversions}</td>
+                          <td className="text-right">{(campaign.ctr ?? 0).toFixed(2)}%</td>
+                          <td className="text-right">{campaign.conversions ?? 0}</td>
                         </tr>
                       ))}
                     </tbody>
