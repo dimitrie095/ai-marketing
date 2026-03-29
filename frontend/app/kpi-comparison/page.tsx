@@ -137,7 +137,7 @@ export default function KPIComparisonPage() {
     getComparisonDateRange(getDateRangeFromPreset('30d'), 'previous_period')
   );
   const [compareMode, setCompareMode] = useState<CompareMode>('previous_period');
-  const [selectedKPI, setSelectedKPI] = useState('spend');
+  const [selectedKPI, setSelectedKPI] = useState('total_spend');
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
   const [data, setData] = useState<PeriodComparisonResponse | null>(null);
@@ -597,12 +597,12 @@ export default function KPIComparisonPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="spend">Ausgaben</SelectItem>
-                  <SelectItem value="revenue">Umsatz</SelectItem>
-                  <SelectItem value="ctr">CTR</SelectItem>
-                  <SelectItem value="cpc">CPC</SelectItem>
-                  <SelectItem value="roas">ROAS</SelectItem>
-                  <SelectItem value="cvr">CVR</SelectItem>
+                  <SelectItem value="total_spend">Ausgaben</SelectItem>
+                  <SelectItem value="total_revenue">Umsatz</SelectItem>
+                  <SelectItem value="avg_ctr">CTR</SelectItem>
+                  <SelectItem value="avg_cpc">CPC</SelectItem>
+                  <SelectItem value="avg_roas">ROAS</SelectItem>
+                  <SelectItem value="avg_cvr">CVR</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -641,11 +641,17 @@ export default function KPIComparisonPage() {
 function getKPILabel(key: string): string {
   const labels: Record<string, string> = {
     'spend': 'Ausgaben',
+    'total_spend': 'Ausgaben',
     'revenue': 'Umsatz',
+    'total_revenue': 'Umsatz',
     'ctr': 'CTR',
+    'avg_ctr': 'CTR',
     'cpc': 'CPC',
+    'avg_cpc': 'CPC',
     'roas': 'ROAS',
+    'avg_roas': 'ROAS',
     'cvr': 'CVR',
+    'avg_cvr': 'CVR',
   };
   return labels[key] || key;
 }

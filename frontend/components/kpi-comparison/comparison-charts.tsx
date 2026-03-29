@@ -51,14 +51,23 @@ const formatChartValue = (value: number, kpi: string): string => {
 const getKPILabel = (kpi: string): string => {
   const labels: Record<string, string> = {
     'spend': 'Ausgaben',
+    'total_spend': 'Ausgaben',
     'revenue': 'Umsatz',
+    'total_revenue': 'Umsatz',
     'ctr': 'CTR',
+    'avg_ctr': 'CTR',
     'cpc': 'CPC',
+    'avg_cpc': 'CPC',
     'roas': 'ROAS',
+    'avg_roas': 'ROAS',
     'cvr': 'CVR',
+    'avg_cvr': 'CVR',
     'impressions': 'Impressionen',
+    'total_impressions': 'Impressionen',
     'clicks': 'Klicks',
+    'total_clicks': 'Klicks',
     'conversions': 'Conversions',
+    'total_conversions': 'Conversions',
   };
   return labels[kpi] || kpi;
 };
