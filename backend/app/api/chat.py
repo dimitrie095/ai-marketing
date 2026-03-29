@@ -99,7 +99,11 @@ async def build_marketing_context() -> str:
             "=== KAMPAGNEN-DETAILS ===",
         ] + campaign_lines
 
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        import time
+        _context_cache["value"] = result
+        _context_cache["expires_at"] = time.monotonic() + _CONTEXT_TTL
+        return result
 
     except Exception as e:
         logger.warning(f"build_marketing_context error: {e}")
