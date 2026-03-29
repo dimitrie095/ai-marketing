@@ -23,6 +23,8 @@
 
 # Achtung!!
 
+- Always read the Product Description file, Lastenheft and Entwicklungsplan first.
+
 - Löscht alle Datein die du erstellt um etwas zu testen nach erfolgreiche Implementierung.
 
 - Clean Code ist Pflicht

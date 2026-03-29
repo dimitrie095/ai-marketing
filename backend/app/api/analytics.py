@@ -4,7 +4,7 @@ Erweiterte Analytics-Funktionen für Dashboards und Reports
 Mit echter MongoDB-Datenbank-Anbindung
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
 import random
@@ -99,6 +99,110 @@ def generate_mock_campaigns(limit: int = 10, sort_by: str = "roas"):
     # Sort mock data
     mock_campaigns.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
     return mock_campaigns
+
+
+def generate_mock_insights(count: int = 4) -> List[Dict[str, Any]]:
+    """Generate realistic mock insights for dashboard"""
+    import random
+    from datetime import datetime, timedelta
+    
+    insight_templates = [
+        {
+            "title": "Conversion Rate drop",
+            "description": "Die Conversion Rate ist in den letzten 7 Tagen um 15% gesunken, hauptsächlich aufgrund erhöhter Seitenladezeiten.",
+            "severity": "high",
+            "metric": "Conversion Rate",
+            "change": "-15%",
+            "direction": "down",
+            "recommendations": ["Optimieren Sie Bilder auf der Landingpage", "Implementieren Sie Lazy Loading", "Überprüfen Sie das Tracking-Setup"]
+        },
+        {
+            "title": "ROAS verbessert",
+            "description": "Return on Ad Spend hat sich aufgrund gezielter Kampagnenoptimierungen um 22% verbessert.",
+            "severity": "medium",
+            "metric": "ROAS",
+            "change": "+22%",
+            "direction": "up",
+            "recommendations": ["Budget auf die besten Kampagnen umschichten", "Ähnliche Zielgruppen testen"]
+        },
+        {
+            "title": "CTR stabil",
+            "description": "Click-Through-Rate bleibt stabil über alle Kanäle hinweg, leicht über Branchendurchschnitt.",
+            "severity": "low",
+            "metric": "CTR",
+            "change": "+2%",
+            "direction": "up",
+            "recommendations": ["Experimentieren Sie mit neuen Ad-Creatives", "A/B-Test von Headlines durchführen"]
+        },
+        {
+            "title": "Customer Acquisition Cost steigt",
+            "description": "CAC ist in den letzten 30 Tagen um 18% gestiegen, hauptsächlich durch teurere Paid-Kanäle.",
+            "severity": "high",
+            "metric": "CAC",
+            "change": "+18%",
+            "direction": "up",
+            "recommendations": ["Performance-Kanäle überprüfen", "Retargeting-Kampagnen ausweiten", "Organische Kanäle stärken"]
+        },
+        {
+            "title": "Impressions erhöht",
+            "description": "Impressions haben um 30% zugenommen, jedoch mit leicht sinkendem CTR.",
+            "severity": "medium",
+            "metric": "Impressions",
+            "change": "+30%",
+            "direction": "up",
+            "recommendations": ["Ad-Qualität überprüfen", "Zielgruppen-Targeting verfeinern"]
+        },
+        {
+            "title": "Profitabilität gestiegen",
+            "description": "Gesamtprofit hat sich um 25% verbessert aufgrund reduzierter Kosten und höherer Conversion Rate.",
+            "severity": "low",
+            "metric": "Profit",
+            "change": "+25%",
+            "direction": "up",
+            "recommendations": ["Skalierung der besten Kampagnen", "Kostenstruktur analysieren"]
+        }
+    ]
+    
+    insights = []
+    for i in range(min(count, len(insight_templates))):
+        template = insight_templates[i]
+        # Generate random timestamp within last 24 hours
+        hours_ago = random.randint(1, 24)
+        timestamp = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat() + "Z"
+        
+        insight = {
+            "id": str(i + 1),
+            "title": template["title"],
+            "description": template["description"],
+            "severity": template["severity"],
+            "metric": template["metric"],
+            "change": template["change"],
+            "direction": template["direction"],
+            "recommendations": template["recommendations"],
+            "timestamp": timestamp
+        }
+        insights.append(insight)
+    
+    # If count > templates, repeat some randomly
+    if count > len(insight_templates):
+        for i in range(len(insight_templates), count):
+            template = random.choice(insight_templates)
+            hours_ago = random.randint(1, 48)
+            timestamp = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat() + "Z"
+            insight = {
+                "id": str(i + 1),
+                "title": template["title"] + f" ({random.randint(1,3)})",
+                "description": template["description"],
+                "severity": template["severity"],
+                "metric": template["metric"],
+                "change": template["change"],
+                "direction": template["direction"],
+                "recommendations": template["recommendations"],
+                "timestamp": timestamp
+            }
+            insights.append(insight)
+    
+    return insights
 
 
 async def get_metrics_from_db(
@@ -1113,6 +1217,17 @@ async def get_period_comparison(
         "group_by": group_by
     }
 
+@router.get("/insights")
+async def get_insights(
+    count: int = Query(4, description="Number of insights to return (default 4)"),
+    db=Depends(get_db)
+):
+    """
+    Get AI-generated insights for marketing performance
+    """
+    insights = generate_mock_insights(count)
+    return {"status": "success", "data": insights}
+
 @router.post("/analysis-results", response_model=Dict[str, Any])
 async def save_analysis_result(
     analysis_data: Dict[str, Any],
@@ -1214,3 +1329,96 @@ def calculate_period_changes(current: dict, compare: dict) -> dict:
                 }
     
     return changes
+
+
+@router.post("/reports/generate", response_model=Dict[str, Any])
+async def generate_report(
+    report_type: str = Body("daily", embed=True),
+    db=Depends(get_db)
+):
+    """
+    Generates automated reports (daily, weekly, benchmark)
+    """
+    from datetime import date, timedelta
+    import uuid
+    
+    today = date.today()
+    
+    if report_type == "daily":
+        start_date = today
+        end_date = today
+        title = "Tagesreport"
+        summary = "Automatisch generierter Tagesreport mit den wichtigsten KPIs."
+    elif report_type == "weekly":
+        start_date = today - timedelta(days=7)
+        end_date = today
+        title = "Wochenreport"
+        summary = "Automatisch generierter Wochenreport mit aggregierten Performance-Daten."
+    elif report_type == "benchmark":
+        # For benchmark, compare last 7 days with previous 7 days
+        start_date = today - timedelta(days=7)
+        end_date = today
+        title = "Benchmark-Report"
+        summary = "Benchmark-Vergleich der aktuellen Woche mit der Vorwoche."
+    else:
+        raise HTTPException(status_code=400, detail="Invalid report type. Use 'daily', 'weekly', or 'benchmark'.")
+    
+    # Get metrics from database
+    metrics = await get_metrics_from_db(start_date, end_date, None)
+    
+    # Calculate summary
+    summary_data = await calculate_summary_from_metrics(metrics)
+    
+    # Prepare metrics for response (similar to frontend Report interface)
+    report_metrics = [
+        {"name": "Conversions", "value": f"{summary_data['total_conversions']:,}"},
+        {"name": "Revenue", "value": f"€{summary_data['total_revenue']:,.2f}"},
+        {"name": "ROAS", "value": f"{summary_data['avg_roas']:.2f}"},
+        {"name": "CTR", "value": f"{summary_data['avg_ctr']:.2f}%"},
+        {"name": "Spend", "value": f"€{summary_data['total_spend']:,.2f}"},
+        {"name": "Profit", "value": f"€{summary_data['profit']:,.2f}"},
+    ]
+    
+    # For benchmark, add comparison data
+    if report_type == "benchmark":
+        # Get previous period metrics
+        prev_start = start_date - timedelta(days=7)
+        prev_end = start_date - timedelta(days=1)
+        prev_metrics = await get_metrics_from_db(prev_start, prev_end, None)
+        prev_summary = await calculate_summary_from_metrics(prev_metrics)
+        
+        # Calculate changes
+        changes = calculate_period_changes(summary_data, prev_summary)
+        # Add change to metrics where applicable
+        for metric in report_metrics:
+            key = None
+            if metric["name"] == "Conversions":
+                key = "total_conversions"
+            elif metric["name"] == "Revenue":
+                key = "total_revenue"
+            elif metric["name"] == "ROAS":
+                key = "avg_roas"
+            elif metric["name"] == "CTR":
+                key = "avg_ctr"
+            elif metric["name"] == "Spend":
+                key = "total_spend"
+            elif metric["name"] == "Profit":
+                key = "profit"
+            if key and key in changes:
+                change_pct = changes[key]["percentage"]
+                metric["change"] = f"{'+' if change_pct > 0 else ''}{change_pct:.1f}%"
+    
+    # Generate report ID
+    report_id = f"{report_type}-{uuid.uuid4().hex[:8]}"
+    
+    report = {
+        "id": report_id,
+        "title": title,
+        "type": report_type,
+        "date": today.isoformat(),
+        "summary": summary,
+        "insights": len(metrics) // 10,  # Mock insights count
+        "metrics": report_metrics
+    }
+    
+    return {"status": "success", "data": report}

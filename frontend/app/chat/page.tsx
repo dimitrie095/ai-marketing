@@ -32,6 +32,7 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Lightbulb,
 } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -45,6 +46,7 @@ import {
   createChatStream,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { InsightPanel, InsightData } from "@/components/insight-panel";
 
 function markdownToHtml(text: string): string {
   if (!text) return "";
@@ -133,6 +135,8 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [insightPanelOpen, setInsightPanelOpen] = useState(true);
+  const [insights, setInsights] = useState<InsightData | undefined>(undefined);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -259,6 +263,7 @@ export default function ChatPage() {
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, tempUserMessage]);
+    fetchInsights(userMessage);
 
     // If no active conversation, create one
     let conversationId = activeConversationId;
@@ -337,6 +342,39 @@ export default function ChatPage() {
   const handleStopStreaming = () => {
     streamRef.current?.close();
     setStreaming(false);
+  };
+
+  const fetchInsights = async (question: string) => {
+    // For now, return mock insights based on question keywords
+    // In future, call agents API
+    const mockInsights: InsightData = {
+      summary: "Automatische Analyse Ihrer Marketing-Daten zeigt wichtige Veränderungen.",
+      keyChanges: [
+        { metric: "ROAS", change: "-15%", direction: "down" },
+        { metric: "CTR", change: "+5%", direction: "up" },
+        { metric: "CPC", change: "+12%", direction: "down" },
+      ],
+      rootCauses: [
+        { cause: "Steigende Kosten pro Klick (CPC)", confidence: 0.8 },
+        { cause: "Sinkende Conversion Rate", confidence: 0.6 },
+        { cause: "Creative Fatigue bei Top-Kampagne", confidence: 0.4 },
+      ],
+      recommendations: [
+        { action: "Budget auf besser performende Kampagnen umschichten", priority: "high" },
+        { action: "A/B Testing für neue Creatives starten", priority: "medium" },
+        { action: "Audience Targeting überprüfen und erweitern", priority: "medium" },
+      ],
+      dataPreview: [
+        { metric: "Gesamtausgaben", value: "€ 4,520", change: "+8%" },
+        { metric: "Umsatz", value: "€ 12,850", change: "-5%" },
+        { metric: "ROAS", value: "2.84", change: "-15%" },
+        { metric: "CTR", value: "1.8%", change: "+5%" },
+      ],
+      overallScore: 65,
+      confidence: 0.7,
+    };
+    setInsights(mockInsights);
+    setInsightPanelOpen(true);
   };
 
   return (
@@ -623,11 +661,41 @@ export default function ChatPage() {
                 </Button>
               )}
             </div>
+            {/* Suggestions */}
+            <div className="mt-3 flex flex-wrap gap-2 justify-center">
+              {[
+                "Warum ist ROAS gefallen?",
+                "Welche Kampagne performt schlecht?",
+                "Wie entwickelt sich die Conversion Rate?",
+                "Zeige mir die wichtigsten KPIs",
+                "Vergleiche Performance nach Kanal",
+                "Wo gibt es Optimierungspotenzial?",
+              ].map((suggestion) => (
+                <Button
+                  key={suggestion}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setInputMessage(suggestion);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-xs"
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
             <p className="text-xs text-muted-foreground mt-2 text-center">
               Drücken Sie Enter zum Senden • Der AI Assistant kann Fehler machen
             </p>
           </CardContent>
         </Card>
+
+        {/* Insight Panel */}
+        <InsightPanel
+          insights={insights}
+          visible={insightPanelOpen}
+        />
       </div>
     </DashboardLayout>
   );

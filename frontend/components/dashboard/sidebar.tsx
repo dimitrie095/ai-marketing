@@ -17,7 +17,8 @@ import {
   Home,
   TrendingUp,
   Users,
-  RefreshCw
+  RefreshCw,
+  Lightbulb
 } from "lucide-react";
 import { useState } from "react";
 
@@ -35,6 +36,7 @@ const navItems: NavItem[] = [
   { href: "/kpi-comparison", label: "KPI Vergleich", icon: <TrendingUp className="h-4 w-4" /> },
   { href: "/audience", label: "Audience", icon: <Users className="h-4 w-4" /> },
   { href: "/chat", label: "AI Chat", icon: <MessageSquare className="h-4 w-4" /> },
+  { href: "/insights", label: "Insights / Reports", icon: <Lightbulb className="h-4 w-4" /> },
   { href: "/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
 ];
 
