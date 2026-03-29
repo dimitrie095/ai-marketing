@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from app.db.session import get_db
 from app.db.models_llm import Conversation, Message
+from app.db.models import User
+from app.core.auth import get_current_active_user, verify_token
 from app.llm import llm_gateway, LLMProvider, ChatCompletionRequest, ChatMessage
 import logging
 
@@ -211,34 +213,28 @@ class StreamingMessage(BaseModel):
 @router.post("/message", response_model=ChatMessageResponse)
 async def send_chat_message(
     request: ChatMessageRequest,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Send a chat message and get a response
-    
-    Args:
-        request: Chat message request
-        
-    Returns:
-        AI response with message data
+    Send a chat message and get a response.
     """
     try:
         # Get or create conversation
         conversation_id = request.conversation_id
-        
+
         if not conversation_id:
-            # Create new conversation
             conversation_id = str(uuid.uuid4())
             conversation = Conversation(
                 id=conversation_id,
-                user_id="anonymous",  # TODO: Get from auth
+                user_id=current_user.username,
                 title=f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
             await conversation.save()
         else:
-            conversation = await Conversation.find_one(Conversation.id == conversation_id)
+            conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -388,35 +384,30 @@ async def chat_sse_endpoint(request: Request):
 @router.post("/sse/stream")
 async def chat_sse_stream(
     request: ChatMessageRequest,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Send a chat message and receive streaming response via Server-Sent Events
-    
-    Args:
-        request: Chat message request
-        
-    Returns:
-        Server-Sent Events stream with AI response
+    Send a chat message and receive streaming response via Server-Sent Events.
     """
     try:
         from fastapi.responses import StreamingResponse
-        
+
         # Get or create conversation
         conversation_id = request.conversation_id
-        
+
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
             conversation = Conversation(
                 id=conversation_id,
-                user_id="anonymous",
+                user_id=current_user.username,
                 title=f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
             await conversation.save()
         else:
-            conversation = await Conversation.find_one(Conversation.id == conversation_id)
+            conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -588,37 +579,40 @@ async def chat_stream_get(
     model: Optional[str] = Query(None, description="Specific model to use"),
     temperature: Optional[float] = Query(0.7, ge=0.0, le=2.0, description="Temperature for generation"),
     max_tokens: Optional[int] = Query(1000, description="Max tokens in response"),
+    token: Optional[str] = Query(None, description="JWT token (for EventSource clients that cannot set headers)"),
     db=Depends(get_db)
 ):
     """
-    Send a chat message and receive streaming response via Server-Sent Events (GET version)
-    
-    Args:
-        message: The user's message
-        conversation_id: Optional conversation ID
-        model: Specific model to use
-        temperature: Temperature for generation
-        max_tokens: Max tokens in response
-        
-    Returns:
-        Server-Sent Events stream with AI response
+    Send a chat message and receive streaming response via Server-Sent Events (GET version).
+    Accepts auth token as query param because EventSource cannot send Authorization headers.
     """
+    # Authenticate via query-param token
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token erforderlich")
+    payload = await verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültiges Token")
+    username: str = payload.get("sub", "")
+    current_user = await User.find_one({"username": username, "is_active": True})
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Benutzer nicht gefunden")
+
     try:
         from fastapi.responses import StreamingResponse
-        
+
         # Get or create conversation
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
             conversation = Conversation(
                 id=conversation_id,
-                user_id="anonymous",
+                user_id=current_user.username,
                 title=f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
             await conversation.save()
         else:
-            conversation = await Conversation.find_one(Conversation.id == conversation_id)
+            conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -786,20 +780,14 @@ async def chat_stream_get(
 @router.get("/conversations/{conversation_id}/history", response_model=ConversationResponse)
 async def get_conversation_history(
     conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Get the full message history for a conversation
-    
-    Args:
-        conversation_id: Conversation ID
-        
-    Returns:
-        Conversation with all messages
+    Get the full message history for a conversation (owned by the authenticated user).
     """
     try:
-        # Get conversation
-        conversation = await Conversation.get(conversation_id)
+        conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -845,18 +833,20 @@ async def get_conversation_history(
         )
 
 
-@router.get("/conversations", response_model=List[Dict[str, Any]])
-async def list_conversations(db=Depends(get_db)):
+@router.get("/conversations")
+async def list_conversations(
+    current_user: User = Depends(get_current_active_user),
+    db=Depends(get_db)
+):
     """
-    List all conversations for a user
-    
-    Returns:
-        List of conversations
+    List all conversations for the authenticated user.
+    Returns { status, conversations } to match frontend expectations.
     """
     try:
-        conversations = await Conversation.find_all().sort([("updated_at", -1)]).to_list()
-        
-        # Add message counts
+        conversations = await Conversation.find(
+            Conversation.user_id == current_user.username
+        ).sort([("updated_at", -1)]).to_list()
+
         result = []
         for conv in conversations:
             message_count = await Message.find({"conversation_id": conv.id}).count()
@@ -866,59 +856,55 @@ async def list_conversations(db=Depends(get_db)):
                 "title": conv.title,
                 "created_at": conv.created_at,
                 "updated_at": conv.updated_at,
-                "message_count": message_count
+                "message_count": message_count,
             })
-        
-        return result
-        
+
+        return {"status": "success", "conversations": result}
+
     except Exception as e:
         logger.error(f"List conversations error: {e}")
-        # Return empty list for now to avoid breaking frontend
-        return []
+        return {"status": "success", "conversations": []}
 
 
-@router.post("/conversations", response_model=ConversationResponse)
+@router.post("/conversations")
 async def create_conversation(
     request: CreateConversationRequest,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Create a new conversation
-    
-    Args:
-        request: Contains optional title
-        
-    Returns:
-        Newly created conversation
+    Create a new conversation for the authenticated user.
+    Returns { status, conversation } to match frontend expectations.
     """
     try:
         conversation_id = str(uuid.uuid4())
         title = request.title or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
-        
+
         conversation = Conversation(
             id=conversation_id,
-            user_id="anonymous",  # TODO: Get from auth
+            user_id=current_user.username,
             title=title,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
         await conversation.save()
-        
-        # Verify it was saved
-        saved = await Conversation.find_one({"id": conversation_id})
-        logger.info(f"✅ Created conversation: {conversation_id}, saved lookup: {saved}")
-        
-        return ConversationResponse(
-            id=conversation.id,
-            user_id=conversation.user_id,
-            title=conversation.title,
-            messages=[],
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
-            total_tokens=0,
-            total_cost=0.0
-        )
-        
+        logger.info(f"✅ Created conversation: {conversation_id} for user: {current_user.username}")
+
+        return {
+            "status": "success",
+            "conversation": {
+                "id": conversation.id,
+                "user_id": conversation.user_id,
+                "title": conversation.title,
+                "messages": [],
+                "created_at": conversation.created_at,
+                "updated_at": conversation.updated_at,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "message_count": 0,
+            },
+        }
+
     except Exception as e:
         logger.error(f"Create conversation error: {e}")
         raise HTTPException(
@@ -927,58 +913,51 @@ async def create_conversation(
         )
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+@router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Get a conversation with all its messages
-    
-    Args:
-        conversation_id: Conversation ID
-        
-    Returns:
-        Conversation with all messages
+    Get a conversation with all its messages (must be owned by the authenticated user).
+    Returns { status, conversation } to match frontend expectations.
     """
     try:
-        # Get conversation
-        conversation = await Conversation.get(conversation_id)
+        conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Conversation {conversation_id} not found"
             )
-        
-        # Get all messages
+
         messages = await Message.find({"conversation_id": conversation_id}).sort("created_at").to_list()
-        
-        # Calculate totals
         total_tokens = sum((msg.tokens_used or 0) for msg in messages)
         total_cost = sum((msg.cost or 0.0) for msg in messages)
-        
-        return ConversationResponse(
-            id=conversation.id,
-            user_id=conversation.user_id,
-            title=conversation.title,
-            messages=[
-                ChatMessageResponse(
-                    id=msg.id,
-                    conversation_id=msg.conversation_id,
-                    role=msg.role,
-                    content=msg.content,
-                    timestamp=msg.created_at,
-                    tokens_used=msg.tokens_used,
-                    cost=float(msg.cost) if msg.cost else 0.0
-                )
+
+        conv_data = {
+            "id": conversation.id,
+            "user_id": conversation.user_id,
+            "title": conversation.title,
+            "created_at": conversation.created_at,
+            "updated_at": conversation.updated_at,
+            "total_tokens": total_tokens,
+            "total_cost": total_cost,
+            "messages": [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.created_at,
+                    "tokens_used": msg.tokens_used,
+                    "cost": float(msg.cost) if msg.cost else 0.0,
+                }
                 for msg in messages
             ],
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
-            total_tokens=total_tokens,
-            total_cost=total_cost
-        )
-        
+        }
+        return {"status": "success", "conversation": conv_data}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -992,19 +971,14 @@ async def get_conversation(
 @router.delete("/conversations/{conversation_id}", response_model=Dict[str, str])
 async def delete_conversation(
     conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Delete a conversation and all its messages
-    
-    Args:
-        conversation_id: Conversation ID
-        
-    Returns:
-        Success message
+    Delete a conversation and all its messages (must be owned by the authenticated user).
     """
     try:
-        conversation = await Conversation.get(conversation_id)
+        conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1034,13 +1008,14 @@ async def delete_conversation(
 @router.post("/conversations/{conversation_id}/clear", response_model=Dict[str, str])
 async def clear_conversation(
     conversation_id: str,
+    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db)
 ):
     """
-    Clear all messages in a conversation
+    Clear all messages in a conversation (must be owned by the authenticated user).
     """
     try:
-        conversation = await Conversation.get(conversation_id)
+        conversation = await Conversation.find_one(Conversation.id == conversation_id, Conversation.user_id == current_user.username)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

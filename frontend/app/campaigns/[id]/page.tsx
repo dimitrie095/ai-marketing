@@ -90,6 +90,8 @@ import {
   getMetricsBreakdown,
   getRootCauseAnalysis,
   exportAnalytics,
+  createConversation,
+  createChatStream,
 } from "@/lib/api";
 import {
   LineChart,
@@ -194,6 +196,8 @@ export default function CampaignDetailPage() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [loadingChat, setLoadingChat] = useState(false);
+  const [campaignConversationId, setCampaignConversationId] = useState<string | null>(null);
+  const chatStreamRef = useRef<{ close: () => void } | null>(null);
   const [selectedTrendMetric, setSelectedTrendMetric] = useState<string>('spend');
   const trendMetricsOptions = [
     { value: 'spend', label: 'Spend' },
@@ -736,46 +740,62 @@ export default function CampaignDetailPage() {
   };
 
   const sendChatMessage = async () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || loadingChat) return;
     const userMessage = chatInput.trim();
     setChatInput('');
     setChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setLoadingChat(true);
-    try {
-      const response = await getAIInsights(
-        [campaignId],
-        dateRange.startDate,
-        dateRange.endDate,
-        userMessage
-      );
-      if (response.success && response.data) {
-        const analysis = response.data.analysis;
-        if (!analysis) {
-          setChatMessages(prev => [...prev, { role: 'assistant', content: 'Keine Analysedaten erhalten.' }]);
-          return;
+
+    // Ensure we have a conversation in DB for this campaign session
+    let convId = campaignConversationId;
+    if (!convId) {
+      try {
+        const resp = await createConversation(`Kampagne: ${campaign?.name || campaignId}`);
+        if (resp.status === 'success' && resp.conversation) {
+          convId = resp.conversation.id;
+          setCampaignConversationId(convId);
         }
-        const parts: string[] = [];
-        if (analysis.summary) parts.push(analysis.summary);
-        if (analysis.key_insights?.length) {
-          parts.push('\n📊 Wichtige Erkenntnisse:\n' + analysis.key_insights.map((i: string) => `• ${i}`).join('\n'));
-        }
-        if (analysis.recommendations?.length) {
-          parts.push('\n💡 Empfehlungen:\n' + analysis.recommendations.map((r: string) => `• ${r}`).join('\n'));
-        }
-        if (analysis.weak_areas?.length) {
-          parts.push('\n⚠️ Schwachstellen:\n' + analysis.weak_areas.map((w: string) => `• ${w}`).join('\n'));
-        }
-        setChatMessages(prev => [...prev, { role: 'assistant', content: parts.join('\n') || 'Keine Antwort erhalten.' }]);
-      } else {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: response.error || 'Fehler beim Abrufen der Antwort.' }]);
+      } catch (err) {
+        console.error('Failed to create conversation:', err);
       }
-    } catch (err) {
-      console.error('Chat error:', err);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Ein Fehler ist aufgetreten.' }]);
-    } finally {
-      setLoadingChat(false);
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     }
+
+    // Add placeholder for streaming AI response
+    const placeholderId = `ai-${Date.now()}`;
+    setChatMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+    chatStreamRef.current?.close();
+    chatStreamRef.current = createChatStream(
+      userMessage,
+      convId ?? undefined,
+      undefined,
+      (chunk) => {
+        setChatMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: last.content + chunk };
+          }
+          return updated;
+        });
+      },
+      () => {
+        setLoadingChat(false);
+        setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      },
+      (err) => {
+        console.error('Chat stream error:', err);
+        setChatMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant' && !last.content) {
+            updated[updated.length - 1] = { ...last, content: 'Ein Fehler ist aufgetreten.' };
+          }
+          return updated;
+        });
+        setLoadingChat(false);
+      }
+    );
   };
 
   const trendMetricConfig: Record<string, { label: string; color: string; formatter: (v: any) => string }> = {
@@ -2029,7 +2049,7 @@ export default function CampaignDetailPage() {
                         );
                       })
                     )}
-                    {loadingChat && (
+                    {loadingChat && chatMessages[chatMessages.length - 1]?.content === '' && (
                       <div className="flex justify-start">
                         <div className="bg-muted rounded-lg px-4 py-2">
                           <div className="flex items-center gap-2">

@@ -18,7 +18,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,7 +27,6 @@ import {
   MessageSquare,
   MoreVertical,
   Trash2,
-  RefreshCw,
   Bot,
   User,
   AlertCircle,
@@ -401,13 +399,6 @@ export default function ChatPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={(e) => handleClearConversation(conversation.id, e as any)}
-                          >
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Nachrichten löschen
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
                             onClick={(e) => handleDeleteConversation(conversation.id, e as any)}
