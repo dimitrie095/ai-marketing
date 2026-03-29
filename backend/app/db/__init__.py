@@ -32,6 +32,9 @@ try:
         PromptTemplate,
         PromptType
     )
+    from .models_ads_config import (
+        AdPlatformConfig
+    )
     DB_IMPORT_SUCCESS = True
     logger.info("✅ Database components imported successfully")
 except Exception as e:
@@ -44,6 +47,7 @@ except Exception as e:
     
     Campaign = AdSet = Ad = Metric = ProcessedData = RawData = MetaInsights = GoogleAdsReport = DummyDocument
     LLMProvider = LLMConfig = Conversation = Message = SyncJob = PromptTemplate = PromptType = DummyDocument
+    AdPlatformConfig = DummyDocument
     
     # Create dummy functions
     async def init_database(): pass
@@ -80,6 +84,9 @@ __all__ = [
     "SyncJob",
     "PromptTemplate",
     "PromptType",
+
+    # Ads platform config
+    "AdPlatformConfig",
     
     # Import status
     "DB_IMPORT_SUCCESS"

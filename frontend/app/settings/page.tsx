@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import {
   Key, Bot, Plus, Trash2, Edit, Check, AlertCircle, RefreshCw,
-  Server, CreditCard, TestTube, ExternalLink, Power, Star, Megaphone,
+  Server, CreditCard, TestTube, ExternalLink, Power, PowerOff, Star, Megaphone,
 } from "lucide-react";
 import {
   getLLMProviders, getLLMConfigs, createLLMConfig, updateLLMConfig,
@@ -29,6 +29,7 @@ import {
   testLLMConfig, getLLMGatewayStatus, initializeLLMDefaultProviders,
   getMetaAdsStatus, syncMetaAdsCampaigns, syncMetaAdsAdSets, syncMetaAdsAds,
   syncMetaAdsInsights, syncMetaAdsAll,
+  getAdsConfigs, createAdsConfig, updateAdsConfig, deleteAdsConfig, activateAdsConfig, deactivateAdsConfig, getAdsConfigsByPlatform, getActiveAdsConfigsStatus, getGoogleAdsStatus,
 } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -58,6 +59,37 @@ interface LLMConfig {
   updated_at?: string;
 }
 
+interface AdPlatformConfig {
+  id: string;
+  platform: string; // "google_ads", "meta_ads"
+  name: string;
+  is_active: boolean;
+  google_client_id?: string;
+  google_client_secret?: string;
+  google_refresh_token?: string;
+  google_developer_token?: string;
+  google_login_customer_id?: string;
+  meta_access_token?: string;
+  meta_app_id?: string;
+  meta_ad_account_id?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+interface AdsFormData {
+  platform: string;
+  name: string;
+  is_active: boolean;
+  google_client_id?: string;
+  google_client_secret?: string;
+  google_refresh_token?: string;
+  google_developer_token?: string;
+  google_login_customer_id?: string;
+  meta_access_token?: string;
+  meta_app_id?: string;
+  meta_ad_account_id?: string;
+}
+
 interface FormData {
   name: string;
   provider_id: string;
@@ -83,6 +115,20 @@ const EMPTY_FORM: FormData = {
   is_default: false, cost_per_1k_input_tokens: 0, cost_per_1k_output_tokens: 0,
 };
 
+const EMPTY_ADS_FORM: AdsFormData = {
+  platform: "",
+  name: "",
+  is_active: false,
+  google_client_id: "",
+  google_client_secret: "",
+  google_refresh_token: "",
+  google_developer_token: "",
+  google_login_customer_id: "",
+  meta_access_token: "",
+  meta_app_id: "",
+  meta_ad_account_id: "",
+};
+
 // ── Helper: extract backend error detail ──────────────────────────────────────
 
 function extractError(err: any, fallback: string): string {
@@ -101,6 +147,10 @@ export default function SettingsPage() {
   const [configs, setConfigs]           = useState<LLMConfig[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<any>(null);
   const [metaAdsStatus, setMetaAdsStatus] = useState<any>(null);
+  const [googleAdsStatus, setGoogleAdsStatus] = useState<any>(null);
+  const [adsConfigs, setAdsConfigs] = useState<AdPlatformConfig[]>([]);
+  const [editingAdsConfig, setEditingAdsConfig] = useState<AdPlatformConfig | null>(null);
+  const [isAdsDialogOpen, setIsAdsDialogOpen] = useState(false);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [success, setSuccess]           = useState<string | null>(null);
@@ -118,6 +168,10 @@ export default function SettingsPage() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const set = (patch: Partial<FormData>) => setForm(prev => ({ ...prev, ...patch }));
 
+  // ads form
+  const [adsForm, setAdsForm] = useState<AdsFormData>(EMPTY_ADS_FORM);
+  const setAds = (patch: Partial<AdsFormData>) => setAdsForm(prev => ({ ...prev, ...patch }));
+
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   useEffect(() => { loadData(); }, []);
@@ -126,11 +180,13 @@ export default function SettingsPage() {
     try {
       setLoading(true);
       setError(null);
-      const [pRes, cRes, gRes, mRes] = await Promise.all([
+      const [pRes, cRes, gRes, mRes, aRes, googleRes] = await Promise.all([
         getLLMProviders().catch(() => null),
         getLLMConfigs().catch(() => null),
         getLLMGatewayStatus().catch(() => null),
         getMetaAdsStatus().catch(() => null),
+        getAdsConfigs().catch(() => null),
+        getGoogleAdsStatus().catch(() => null),
       ]);
 
       // Auto-initialize default providers if DB is empty
@@ -145,6 +201,8 @@ export default function SettingsPage() {
       if (cRes?.configs) setConfigs(cRes.configs);
       if (gRes)          setGatewayStatus(gRes);
       if (mRes)          setMetaAdsStatus(mRes);
+      if (aRes?.data)    setAdsConfigs(aRes.data);
+      if (googleRes)     setGoogleAdsStatus(googleRes);
     } catch (err) {
       setError("Fehler beim Laden der Einstellungen");
     } finally {
@@ -268,6 +326,87 @@ export default function SettingsPage() {
       cost_per_1k_output_tokens: cfg.cost_per_1k_output_tokens,
     });
     setIsEditOpen(true);
+  };
+
+  // ── Ads Config handlers ───────────────────────────────────────────────────────
+
+  const handleAddAdsConfig = async () => {
+    try {
+      setError(null);
+      const res = await createAdsConfig(adsForm);
+      if (res.status === "success") {
+        showSuccess("Ads Konfiguration erfolgreich erstellt");
+        setIsAdsDialogOpen(false);
+        setAdsForm(EMPTY_ADS_FORM);
+        loadData();
+      } else {
+        setError("Fehler beim Erstellen der Ads Konfiguration");
+      }
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Erstellen der Ads Konfiguration"));
+    }
+  };
+
+  const handleUpdateAdsConfig = async () => {
+    if (!editingAdsConfig) return;
+    try {
+      setError(null);
+      const res = await updateAdsConfig(editingAdsConfig.id, adsForm);
+      if (res.status === "success") {
+        showSuccess("Ads Konfiguration erfolgreich aktualisiert");
+        setIsAdsDialogOpen(false);
+        setEditingAdsConfig(null);
+        setAdsForm(EMPTY_ADS_FORM);
+        loadData();
+      } else {
+        setError("Fehler beim Aktualisieren der Ads Konfiguration");
+      }
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Aktualisieren der Ads Konfiguration"));
+    }
+  };
+
+  const handleDeleteAdsConfig = async (id: string) => {
+    if (!confirm("Ads Konfiguration wirklich löschen?")) return;
+    try {
+      await deleteAdsConfig(id);
+      showSuccess("Ads Konfiguration gelöscht");
+      loadData();
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Löschen"));
+    }
+  };
+
+  const handleToggleAdsActive = async (cfg: AdPlatformConfig) => {
+    try {
+      const res = cfg.is_active
+        ? await deactivateAdsConfig(cfg.id)
+        : await activateAdsConfig(cfg.id);
+      if (res.status === "success") {
+        showSuccess(cfg.is_active ? "Konfiguration deaktiviert" : "Konfiguration aktiviert");
+        loadData();
+      }
+    } catch (err: any) {
+      setError(extractError(err, "Fehler beim Ändern des Status"));
+    }
+  };
+
+  const openAdsEditDialog = (cfg: AdPlatformConfig) => {
+    setEditingAdsConfig(cfg);
+    setAdsForm({
+      platform: cfg.platform,
+      name: cfg.name,
+      is_active: cfg.is_active,
+      google_client_id: cfg.google_client_id || "",
+      google_client_secret: cfg.google_client_secret || "",
+      google_refresh_token: cfg.google_refresh_token || "",
+      google_developer_token: cfg.google_developer_token || "",
+      google_login_customer_id: cfg.google_login_customer_id || "",
+      meta_access_token: cfg.meta_access_token || "",
+      meta_app_id: cfg.meta_app_id || "",
+      meta_ad_account_id: cfg.meta_ad_account_id || "",
+    });
+    setIsAdsDialogOpen(true);
   };
 
   // ── Sync handler ──────────────────────────────────────────────────────────────
@@ -523,6 +662,120 @@ export default function SettingsPage() {
 
           {/* ── Ads Tab ── */}
           <TabsContent value="ads" className="space-y-6">
+            {/* Google Ads Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" />Google Ads Konfigurationen</CardTitle>
+                <CardDescription>Verwalten Sie Ihre Google Ads API Verbindungen</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex justify-between items-center mb-4">
+                  <Button onClick={() => { setAdsForm({...EMPTY_ADS_FORM, platform: "google_ads"}); setIsAdsDialogOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-2" /> Neue Konfiguration
+                  </Button>
+                </div>
+                {adsConfigs.filter(c => c.platform === "google_ads").length === 0 ? (
+                  <p className="text-muted-foreground">Keine Google Ads Konfigurationen vorhanden.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Client ID</TableHead>
+                        <TableHead>Developer Token</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Aktionen</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {adsConfigs.filter(c => c.platform === "google_ads").map(cfg => (
+                        <TableRow key={cfg.id}>
+                          <TableCell className="font-medium">{cfg.name}</TableCell>
+                          <TableCell className="font-mono text-xs">{cfg.google_client_id ? `${cfg.google_client_id.substring(0, 8)}...` : "Nicht gesetzt"}</TableCell>
+                          <TableCell className="font-mono text-xs">{cfg.google_developer_token ? `${cfg.google_developer_token.substring(0, 8)}...` : "Nicht gesetzt"}</TableCell>
+                          <TableCell>
+                            <Badge variant={cfg.is_active ? "default" : "secondary"}>
+                              {cfg.is_active ? "Aktiv" : "Inaktiv"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => handleToggleAdsActive(cfg)} title={cfg.is_active ? "Deaktivieren" : "Aktivieren"}>
+                                {cfg.is_active ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => openAdsEditDialog(cfg)} title="Bearbeiten">
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteAdsConfig(cfg.id)} className="text-destructive" title="Löschen">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Meta Ads Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" />Meta Ads Konfigurationen</CardTitle>
+                <CardDescription>Verwalten Sie Ihre Meta Ads API Verbindungen</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex justify-between items-center mb-4">
+                  <Button onClick={() => { setAdsForm({...EMPTY_ADS_FORM, platform: "meta_ads"}); setIsAdsDialogOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-2" /> Neue Konfiguration
+                  </Button>
+                </div>
+                {adsConfigs.filter(c => c.platform === "meta_ads").length === 0 ? (
+                  <p className="text-muted-foreground">Keine Meta Ads Konfigurationen vorhanden.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>App ID</TableHead>
+                        <TableHead>Account ID</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Aktionen</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {adsConfigs.filter(c => c.platform === "meta_ads").map(cfg => (
+                        <TableRow key={cfg.id}>
+                          <TableCell className="font-medium">{cfg.name}</TableCell>
+                          <TableCell className="font-mono text-xs">{cfg.meta_app_id || "Nicht gesetzt"}</TableCell>
+                          <TableCell className="font-mono text-xs">{cfg.meta_ad_account_id || "Nicht gesetzt"}</TableCell>
+                          <TableCell>
+                            <Badge variant={cfg.is_active ? "default" : "secondary"}>
+                              {cfg.is_active ? "Aktiv" : "Inaktiv"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => handleToggleAdsActive(cfg)} title={cfg.is_active ? "Deaktivieren" : "Aktivieren"}>
+                                {cfg.is_active ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => openAdsEditDialog(cfg)} title="Bearbeiten">
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteAdsConfig(cfg.id)} className="text-destructive" title="Löschen">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" />Meta Ads Status</CardTitle>
@@ -627,6 +880,160 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Ads Config Dialog */}
+        <Dialog open={isAdsDialogOpen} onOpenChange={o => { setIsAdsDialogOpen(o); if (!o) { setEditingAdsConfig(null); setAdsForm(EMPTY_ADS_FORM); } }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editingAdsConfig ? 'Ads Konfiguration bearbeiten' : 'Neue Ads Konfiguration'}</DialogTitle>
+              <DialogDescription>Konfigurieren Sie Ihre Google Ads oder Meta Ads API Verbindung</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="platform">Plattform</Label>
+                  <Select
+                    value={adsForm.platform}
+                    onValueChange={(v) => setAds({ platform: v })}
+                    disabled={!!editingAdsConfig}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Plattform auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="google_ads">Google Ads</SelectItem>
+                      <SelectItem value="meta_ads">Meta Ads</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="name">Name</Label>
+                  <Input
+                    id="name"
+                    value={adsForm.name}
+                    onChange={(e) => setAds({ name: e.target.value })}
+                    placeholder="Meine Konfiguration"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="is_active">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="is_active"
+                      checked={adsForm.is_active}
+                      onChange={(e) => setAds({ is_active: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <span>Aktiv</span>
+                  </div>
+                </Label>
+              </div>
+
+              {/* Google Ads Fields */}
+              {adsForm.platform === 'google_ads' && (
+                <div className="space-y-4 border p-4 rounded-lg">
+                  <h4 className="font-medium">Google Ads Credentials</h4>
+                  <div className="grid gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="google_client_id">Client ID</Label>
+                      <Input
+                        id="google_client_id"
+                        value={adsForm.google_client_id || ''}
+                        onChange={(e) => setAds({ google_client_id: e.target.value })}
+                        placeholder="xxxxxxx.apps.googleusercontent.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="google_client_secret">Client Secret</Label>
+                      <Input
+                        id="google_client_secret"
+                        type="password"
+                        value={adsForm.google_client_secret || ''}
+                        onChange={(e) => setAds({ google_client_secret: e.target.value })}
+                        placeholder="GOCSPX-..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="google_refresh_token">Refresh Token</Label>
+                      <Input
+                        id="google_refresh_token"
+                        type="password"
+                        value={adsForm.google_refresh_token || ''}
+                        onChange={(e) => setAds({ google_refresh_token: e.target.value })}
+                        placeholder="1//..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="google_developer_token">Developer Token</Label>
+                      <Input
+                        id="google_developer_token"
+                        type="password"
+                        value={adsForm.google_developer_token || ''}
+                        onChange={(e) => setAds({ google_developer_token: e.target.value })}
+                        placeholder="ABCD..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="google_login_customer_id">Login Customer ID (optional)</Label>
+                      <Input
+                        id="google_login_customer_id"
+                        value={adsForm.google_login_customer_id || ''}
+                        onChange={(e) => setAds({ google_login_customer_id: e.target.value })}
+                        placeholder="1234567890"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Meta Ads Fields */}
+              {adsForm.platform === 'meta_ads' && (
+                <div className="space-y-4 border p-4 rounded-lg">
+                  <h4 className="font-medium">Meta Ads Credentials</h4>
+                  <div className="grid gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="meta_access_token">Access Token</Label>
+                      <Input
+                        id="meta_access_token"
+                        type="password"
+                        value={adsForm.meta_access_token || ''}
+                        onChange={(e) => setAds({ meta_access_token: e.target.value })}
+                        placeholder="EAAG..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="meta_app_id">App ID (optional)</Label>
+                      <Input
+                        id="meta_app_id"
+                        value={adsForm.meta_app_id || ''}
+                        onChange={(e) => setAds({ meta_app_id: e.target.value })}
+                        placeholder="123456789012345"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="meta_ad_account_id">Ad Account ID</Label>
+                      <Input
+                        id="meta_ad_account_id"
+                        value={adsForm.meta_ad_account_id || ''}
+                        onChange={(e) => setAds({ meta_ad_account_id: e.target.value })}
+                        placeholder="act_123456789012345"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setIsAdsDialogOpen(false); setEditingAdsConfig(null); setAdsForm(EMPTY_ADS_FORM); }}>Abbrechen</Button>
+              <Button onClick={editingAdsConfig ? handleUpdateAdsConfig : handleAddAdsConfig} disabled={!adsForm.platform || !adsForm.name}>
+                {editingAdsConfig ? 'Aktualisieren' : 'Speichern'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </DashboardLayout>
   );

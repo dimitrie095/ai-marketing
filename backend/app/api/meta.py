@@ -4,13 +4,36 @@ Phase 2: I-03 - Meta Ads API Integration API
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import date
 from app.db.session import get_db
 from app.services.meta_ads_etl import MetaAdsETL
+from app.db.models_ads_config import AdPlatformConfig
 import os
 
 router = APIRouter(prefix="/meta", tags=["Meta Ads"])
+
+
+async def get_meta_ads_config() -> Dict[str, Any]:
+    """
+    Retrieve active Meta Ads configuration from database or fallback to environment variables.
+    Returns dict with keys: access_token, app_id, ad_account_id
+    """
+    config = await AdPlatformConfig.find_one({"platform": "meta_ads", "is_active": True})
+    if config:
+        return {
+            "access_token": config.meta_access_token,
+            "app_id": config.meta_app_id,
+            "ad_account_id": config.meta_ad_account_id,
+            "config_source": "database"
+        }
+    else:
+        return {
+            "access_token": os.getenv("META_ACCESS_TOKEN"),
+            "app_id": os.getenv("META_APP_ID"),
+            "ad_account_id": os.getenv("META_AD_ACCOUNT_ID"),
+            "config_source": "environment"
+        }
 
 
 @router.post("/sync/campaigns")
@@ -37,11 +60,8 @@ async def sync_campaigns(
     """
     try:
         etl = MetaAdsETL()
-        access_token = os.getenv("META_ACCESS_TOKEN")
-        app_id = os.getenv("META_APP_ID")
-        ad_account_id = os.getenv("META_AD_ACCOUNT_ID")
-        
-        await etl.initialize(access_token, app_id, ad_account_id)
+        config = await get_meta_ads_config()
+        await etl.initialize(config["access_token"], config["app_id"], config["ad_account_id"])
         
         # Führe Sync im Hintergrund aus
         background_tasks.add_task(etl.sync_campaigns)
@@ -79,11 +99,8 @@ async def sync_adsets(
         from app.db.models import Campaign
         
         etl = MetaAdsETL()
-        access_token = os.getenv("META_ACCESS_TOKEN")
-        app_id = os.getenv("META_APP_ID")
-        ad_account_id = os.getenv("META_AD_ACCOUNT_ID")
-        
-        await etl.initialize(access_token, app_id, ad_account_id)
+        config = await get_meta_ads_config()
+        await etl.initialize(config["access_token"], config["app_id"], config["ad_account_id"])
         
         # Hole Campaign IDs falls nicht angegeben
         if not campaign_ids:
@@ -127,11 +144,8 @@ async def sync_ads(
         from app.db.models import AdSet
         
         etl = MetaAdsETL()
-        access_token = os.getenv("META_ACCESS_TOKEN")
-        app_id = os.getenv("META_APP_ID")
-        ad_account_id = os.getenv("META_AD_ACCOUNT_ID")
-        
-        await etl.initialize(access_token, app_id, ad_account_id)
+        config = await get_meta_ads_config()
+        await etl.initialize(config["access_token"], config["app_id"], config["ad_account_id"])
         
         # Hole AdSet IDs falls nicht angegeben
         if not adset_ids:

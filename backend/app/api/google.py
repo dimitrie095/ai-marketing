@@ -4,13 +4,40 @@ ETL Operationen für Google Ads Daten
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import date
 from app.db.session import get_db
 from app.services.google_ads_etl import GoogleAdsETL
+from app.db.models_ads_config import AdPlatformConfig
 import os
 
 router = APIRouter(prefix="/google", tags=["Google Ads"])
+
+
+async def get_google_ads_config() -> Dict[str, Any]:
+    """
+    Retrieve active Google Ads configuration from database or fallback to environment variables.
+    Returns dict with keys: client_id, client_secret, refresh_token, developer_token, login_customer_id
+    """
+    config = await AdPlatformConfig.find_one({"platform": "google_ads", "is_active": True})
+    if config:
+        return {
+            "client_id": config.google_client_id,
+            "client_secret": config.google_client_secret,
+            "refresh_token": config.google_refresh_token,
+            "developer_token": config.google_developer_token,
+            "login_customer_id": config.google_login_customer_id,
+            "config_source": "database"
+        }
+    else:
+        return {
+            "client_id": os.getenv("GOOGLE_ADS_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_ADS_CLIENT_SECRET"),
+            "refresh_token": os.getenv("GOOGLE_ADS_REFRESH_TOKEN"),
+            "developer_token": os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN"),
+            "login_customer_id": os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID"),
+            "config_source": "environment"
+        }
 
 
 @router.post("/sync/campaigns")
@@ -38,18 +65,13 @@ async def sync_campaigns(
     """
     try:
         etl = GoogleAdsETL()
-        client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
-        client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
-        refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
-        developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
-        login_customer_id = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
-        
+        config = await get_google_ads_config()
         await etl.initialize(
-            client_id=client_id,
-            client_secret=client_secret,
-            refresh_token=refresh_token,
-            developer_token=developer_token,
-            login_customer_id=login_customer_id
+            client_id=config["client_id"],
+            client_secret=config["client_secret"],
+            refresh_token=config["refresh_token"],
+            developer_token=config["developer_token"],
+            login_customer_id=config["login_customer_id"]
         )
         
         # Führe Sync im Hintergrund aus
@@ -88,18 +110,13 @@ async def sync_ad_groups(
         from app.db.models import Campaign
         
         etl = GoogleAdsETL()
-        client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
-        client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
-        refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
-        developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
-        login_customer_id = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
-        
+        config = await get_google_ads_config()
         await etl.initialize(
-            client_id=client_id,
-            client_secret=client_secret,
-            refresh_token=refresh_token,
-            developer_token=developer_token,
-            login_customer_id=login_customer_id
+            client_id=config["client_id"],
+            client_secret=config["client_secret"],
+            refresh_token=config["refresh_token"],
+            developer_token=config["developer_token"],
+            login_customer_id=config["login_customer_id"]
         )
         
         # Hole Campaign IDs falls nicht angegeben
@@ -144,18 +161,13 @@ async def sync_ads(
         from app.db.models import AdSet
         
         etl = GoogleAdsETL()
-        client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
-        client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
-        refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
-        developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
-        login_customer_id = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
-        
+        config = await get_google_ads_config()
         await etl.initialize(
-            client_id=client_id,
-            client_secret=client_secret,
-            refresh_token=refresh_token,
-            developer_token=developer_token,
-            login_customer_id=login_customer_id
+            client_id=config["client_id"],
+            client_secret=config["client_secret"],
+            refresh_token=config["refresh_token"],
+            developer_token=config["developer_token"],
+            login_customer_id=config["login_customer_id"]
         )
         
         # Hole AdGroup IDs falls nicht angegeben
@@ -310,6 +322,85 @@ async def get_reports(
             "data": reports,
             "count": len(reports),
             "date_range": f"{start_date} bis {end_date}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+
+
+@router.get("/status")
+async def get_google_ads_status(db=Depends(get_db)):
+    """
+    Gibt Status der Google Ads API Konfiguration zurück
+    
+    Prüft zuerst aktive Datenbankkonfiguration, fallback auf Umgebungsvariablen.
+    
+    Beispiel:
+    ```
+    GET /api/v1/google/status
+    ```
+    
+    Response:
+    ```json
+    {
+        "status": "configured",
+        "mode": "mock",  // oder "real"
+        "login_customer_id": "1234567890",
+        "has_credentials": true,
+        "config_source": "database", // oder "environment"
+        "entities": {
+            "campaigns": 3,
+            "ad_groups": 6,
+            "ads": 12
+        }
+    }
+    ```
+    """
+    try:
+        from app.db.models import Campaign, AdSet, Ad
+        
+        # Check database for active google_ads config
+        config = await AdPlatformConfig.find_one({"platform": "google_ads", "is_active": True})
+        config_source = "database" if config else "environment"
+        
+        if config:
+            client_id = config.google_client_id
+            client_secret = config.google_client_secret
+            refresh_token = config.google_refresh_token
+            developer_token = config.google_developer_token
+            login_customer_id = config.google_login_customer_id
+        else:
+            # Fallback to environment variables
+            client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
+            client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
+            refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
+            developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+            login_customer_id = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
+        
+        # Zähle Entities (generische Campaigns/AdSets/Ads, die von Google Ads stammen könnten)
+        campaign_count = await Campaign.count()
+        adset_count = await AdSet.count()
+        ad_count = await Ad.count()
+        
+        # Determine mode: real if all required credentials are present and not dummy values
+        has_valid_credentials = bool(client_id) and client_id.strip() != "" and \
+                                bool(client_secret) and client_secret.strip() != "" and \
+                                bool(refresh_token) and refresh_token.strip() != "" and \
+                                bool(developer_token) and developer_token.strip() != ""
+        mode = "real" if has_valid_credentials else "mock"
+        
+        status = "configured" if has_valid_credentials else "not_configured"
+        
+        return {
+            "status": status,
+            "mode": mode,
+            "login_customer_id": login_customer_id,
+            "has_credentials": has_valid_credentials,
+            "config_source": config_source,
+            "entities": {
+                "campaigns": campaign_count,
+                "ad_groups": adset_count,
+                "ads": ad_count
+            }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")

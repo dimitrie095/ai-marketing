@@ -81,4 +81,10 @@ try:
 except ImportError:
     pass
 
+try:
+    from .ads_config import router as ads_config_router
+    api_router.include_router(ads_config_router, tags=["Ads Config"])
+except ImportError:
+    pass
+
 __all__ = ["api_router"]
