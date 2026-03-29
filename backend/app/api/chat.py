@@ -5,7 +5,7 @@ B-06: Chat SSE Endpoint
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import asyncio
 import json
 import uuid
@@ -19,6 +19,105 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
+
+_context_cache: dict = {"value": None, "expires_at": 0.0}
+_CONTEXT_TTL = 300  # seconds
+
+
+async def build_marketing_context() -> str:
+    """
+    Fetches real campaign KPI data from the database and builds a system context
+    string so the AI can answer questions based on actual numbers.
+    Results are cached for 5 minutes to avoid DB overload on every chat message.
+    """
+    import time
+    now = time.monotonic()
+    if _context_cache["value"] and now < _context_cache["expires_at"]:
+        return _context_cache["value"]
+
+    try:
+        from app.db.models import Campaign
+        from app.services.kpi_service import KPIService
+
+        today = date.today()
+        start_7d = today - timedelta(days=7)
+        start_30d = today - timedelta(days=30)
+
+        campaigns = await Campaign.find_all().to_list()
+        if not campaigns:
+            return (
+                "Du bist ein KI-Marketing-Analyst. "
+                "Aktuell sind keine Kampagnendaten in der Datenbank vorhanden."
+            )
+
+        total_spend_7d = total_revenue_7d = 0.0
+        total_spend_30d = total_revenue_30d = 0.0
+        campaign_lines = []
+
+        for c in campaigns:
+            kpi7 = await KPIService.get_kpi_for_entity("campaign", c.id, start_7d, today)
+            kpi30 = await KPIService.get_kpi_for_entity("campaign", c.id, start_30d, today)
+            d7 = kpi7.get("data", {}) if kpi7.get("status") == "success" else {}
+            d30 = kpi30.get("data", {}) if kpi30.get("status") == "success" else {}
+
+            total_spend_7d += float(d7.get("spend") or 0)
+            total_revenue_7d += float(d7.get("revenue") or 0)
+            total_spend_30d += float(d30.get("spend") or 0)
+            total_revenue_30d += float(d30.get("revenue") or 0)
+
+            def fmt(d: dict) -> str:
+                return (
+                    f"Ausgaben={d.get('spend', 'N/A')} €, "
+                    f"Umsatz={d.get('revenue', 'N/A')} €, "
+                    f"ROAS={d.get('roas', 'N/A')}, "
+                    f"CTR={d.get('ctr', 'N/A')}%, "
+                    f"CPC={d.get('cpc', 'N/A')} €, "
+                    f"Conversions={d.get('conversions', 'N/A')}, "
+                    f"Impressions={d.get('impressions', 'N/A')}, "
+                    f"Klicks={d.get('clicks', 'N/A')}"
+                )
+
+            campaign_lines.append(
+                f"Kampagne \"{c.name}\" (Status: {c.status}):\n"
+                f"  7 Tage  ({start_7d} – {today}): {fmt(d7) if d7 else 'keine Daten'}\n"
+                f"  30 Tage ({start_30d} – {today}): {fmt(d30) if d30 else 'keine Daten'}"
+            )
+
+        roas_7d = round(total_revenue_7d / total_spend_7d, 2) if total_spend_7d else 0
+        roas_30d = round(total_revenue_30d / total_spend_30d, 2) if total_spend_30d else 0
+
+        lines = [
+            "Du bist ein KI-Marketing-Analyst mit direktem Zugriff auf folgende ECHTE Datenbankwerte.",
+            "Beantworte Fragen immer mit diesen konkreten Zahlen – bitte den Nutzer NIEMALS, Daten manuell einzugeben.",
+            f"Aktuelles Datum: {today.isoformat()}",
+            "",
+            "=== GESAMTÜBERSICHT (alle Kampagnen) ===",
+            f"Letzte 7 Tage:  Ausgaben={total_spend_7d:.2f} €  Umsatz={total_revenue_7d:.2f} €  ROAS={roas_7d}x",
+            f"Letzte 30 Tage: Ausgaben={total_spend_30d:.2f} €  Umsatz={total_revenue_30d:.2f} €  ROAS={roas_30d}x",
+            "",
+            "=== KAMPAGNEN-DETAILS ===",
+        ] + campaign_lines
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning(f"build_marketing_context error: {e}")
+        return (
+            "Du bist ein KI-Marketing-Analyst. "
+            "Die Datenbankverbindung ist momentan nicht verfügbar."
+        )
+
+
+async def load_conversation_messages(conversation_id: str, limit: int = 20) -> List[ChatMessage]:
+    """Returns recent messages of a conversation as ChatMessage list."""
+    try:
+        msgs = await Message.find({"conversation_id": conversation_id}).sort("created_at").to_list()
+        msgs = msgs[-limit:]
+        return [ChatMessage(role=m.role, content=m.content) for m in msgs]
+    except Exception as e:
+        logger.warning(f"load_conversation_messages error: {e}")
+        return []
 
 
 # ============================================
@@ -121,12 +220,13 @@ async def send_chat_message(
             created_at=datetime.utcnow()
         )
         await user_message.save()
-        
-        # Prepare chat request
+
+        # Build system context with real DB data + conversation history
+        system_context = await build_marketing_context()
+        history = await load_conversation_messages(conversation_id)
+
         chat_request = ChatCompletionRequest(
-            messages=[
-                ChatMessage(role="user", content=request.message)
-            ],
+            messages=[ChatMessage(role="system", content=system_context)] + history,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens
@@ -299,17 +399,19 @@ async def chat_sse_stream(
         )
         await user_message.save()
         
+        # Build system context with real DB data + conversation history
+        system_context = await build_marketing_context()
+        history = await load_conversation_messages(conversation_id)
+
         # Prepare chat request with streaming
         chat_request = ChatCompletionRequest(
-            messages=[
-                ChatMessage(role="user", content=request.message)
-            ],
+            messages=[ChatMessage(role="system", content=system_context)] + history,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True
         )
-        
+
         # Determine provider
         provider = None
         if request.model and "gpt" in request.model:
@@ -498,12 +600,14 @@ async def chat_stream_get(
             created_at=datetime.utcnow()
         )
         await user_message.save()
-        
+
+        # Build system context with real DB data + conversation history
+        system_context = await build_marketing_context()
+        history = await load_conversation_messages(conversation_id)
+
         # Prepare chat request with streaming
         chat_request = ChatCompletionRequest(
-            messages=[
-                ChatMessage(role="user", content=message)
-            ],
+            messages=[ChatMessage(role="system", content=system_context)] + history,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
