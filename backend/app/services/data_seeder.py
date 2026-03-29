@@ -7,7 +7,7 @@ import random
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
-from app.db.models import Metric, Campaign, AdSet, Ad
+from app.db.models import Metric, Campaign, AdSet, Ad, AudienceDemographic
 
 
 async def seed_metrics_for_campaign(
@@ -90,6 +90,94 @@ async def seed_metrics_for_campaign(
     return created
 
 
+async def seed_demographics_for_campaign(campaign_id: str) -> bool:
+    """
+    Generate and upsert realistic audience demographic data for a campaign.
+    Returns True if a new record was created/updated.
+    """
+    existing = await AudienceDemographic.find_one(
+        AudienceDemographic.campaign_id == campaign_id
+    )
+
+    # Randomised but realistic age distribution (sum = 100)
+    age_raw = [
+        random.uniform(10, 22),   # 18-24
+        random.uniform(25, 38),   # 25-34  (prime)
+        random.uniform(18, 28),   # 35-44
+        random.uniform(10, 18),   # 45-54
+        random.uniform(4, 12),    # 55+
+    ]
+    total_age = sum(age_raw)
+    a18, a25, a35, a45, a55 = [round(v / total_age * 100, 1) for v in age_raw]
+
+    # Gender split
+    male_pct = round(random.uniform(38, 62), 1)
+    female_pct = round(100 - male_pct - random.uniform(1, 4), 1)
+    unknown_pct = round(100 - male_pct - female_pct, 1)
+
+    # Device split
+    mobile_pct = round(random.uniform(52, 72), 1)
+    desktop_pct = round(random.uniform(22, 38), 1)
+    tablet_pct = round(100 - mobile_pct - desktop_pct, 1)
+
+    # Top 5 German cities/regions
+    cities = [
+        "Berlin", "München", "Hamburg", "Frankfurt", "Köln",
+        "Stuttgart", "Düsseldorf", "Leipzig", "Dortmund", "Essen",
+        "Bremen", "Dresden", "Hannover", "Nürnberg", "Duisburg",
+    ]
+    selected_cities = random.sample(cities, 5)
+    city_raw = sorted([random.uniform(8, 35) for _ in range(5)], reverse=True)
+    total_c = sum(city_raw)
+    top_locations = ",".join(
+        f"{city}:{round(v / total_c * 100, 1)}"
+        for city, v in zip(selected_cities, city_raw)
+    )
+
+    # Top 5 interest categories
+    interests_pool = [
+        "Mode & Fashion", "Elektronik & Gadgets", "Sport & Fitness",
+        "Reisen & Tourismus", "Essen & Kochen", "Haushalt & Wohnen",
+        "Beauty & Kosmetik", "Gesundheit & Wellness", "Gaming",
+        "Automobil", "Finanzen & Investment", "Musik & Entertainment",
+        "Nachhaltigkeit", "Familie & Kinder", "Bildung",
+    ]
+    selected_interests = random.sample(interests_pool, 5)
+    int_raw = sorted([random.uniform(8, 35) for _ in range(5)], reverse=True)
+    total_i = sum(int_raw)
+    top_interests = ",".join(
+        f"{interest}:{round(v / total_i * 100, 1)}"
+        for interest, v in zip(selected_interests, int_raw)
+    )
+
+    demo_data = dict(
+        campaign_id=campaign_id,
+        age_18_24=Decimal(str(a18)),
+        age_25_34=Decimal(str(a25)),
+        age_35_44=Decimal(str(a35)),
+        age_45_54=Decimal(str(a45)),
+        age_55_plus=Decimal(str(a55)),
+        gender_male=Decimal(str(male_pct)),
+        gender_female=Decimal(str(female_pct)),
+        gender_unknown=Decimal(str(unknown_pct)),
+        device_mobile=Decimal(str(mobile_pct)),
+        device_desktop=Decimal(str(desktop_pct)),
+        device_tablet=Decimal(str(tablet_pct)),
+        top_locations=top_locations,
+        top_interests=top_interests,
+        updated_at=datetime.utcnow(),
+    )
+
+    if existing:
+        for k, v in demo_data.items():
+            setattr(existing, k, v)
+        await existing.save()
+    else:
+        await AudienceDemographic(**demo_data).insert()
+
+    return True
+
+
 async def seed_all_campaigns(days: int = 90) -> dict:
     """
     Seed metrics for all campaigns in the database.
@@ -111,6 +199,7 @@ async def seed_all_campaigns(days: int = 90) -> dict:
             base_roas=base_roas,
         )
         total_created += created
+        await seed_demographics_for_campaign(str(campaign.id))
 
     return {
         "campaigns_processed": len(campaigns),

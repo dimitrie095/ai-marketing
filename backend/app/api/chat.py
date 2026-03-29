@@ -37,8 +37,9 @@ async def build_marketing_context() -> str:
         return _context_cache["value"]
 
     try:
-        from app.db.models import Campaign
+        from app.db.models import Campaign, AudienceDemographic
         from app.services.kpi_service import KPIService
+        from app.services.data_seeder import seed_demographics_for_campaign
 
         today = date.today()
         start_7d = today - timedelta(days=7)
@@ -55,6 +56,18 @@ async def build_marketing_context() -> str:
         total_spend_30d = total_revenue_30d = 0.0
         campaign_lines = []
 
+        def fmt(d: dict) -> str:
+            return (
+                f"Ausgaben={d.get('spend', 'N/A')} €, "
+                f"Umsatz={d.get('revenue', 'N/A')} €, "
+                f"ROAS={d.get('roas', 'N/A')}, "
+                f"CTR={d.get('ctr', 'N/A')}%, "
+                f"CPC={d.get('cpc', 'N/A')} €, "
+                f"Conversions={d.get('conversions', 'N/A')}, "
+                f"Impressions={d.get('impressions', 'N/A')}, "
+                f"Klicks={d.get('clicks', 'N/A')}"
+            )
+
         for c in campaigns:
             kpi7 = await KPIService.get_kpi_for_entity("campaign", c.id, start_7d, today)
             kpi30 = await KPIService.get_kpi_for_entity("campaign", c.id, start_30d, today)
@@ -66,22 +79,40 @@ async def build_marketing_context() -> str:
             total_spend_30d += float(d30.get("spend") or 0)
             total_revenue_30d += float(d30.get("revenue") or 0)
 
-            def fmt(d: dict) -> str:
-                return (
-                    f"Ausgaben={d.get('spend', 'N/A')} €, "
-                    f"Umsatz={d.get('revenue', 'N/A')} €, "
-                    f"ROAS={d.get('roas', 'N/A')}, "
-                    f"CTR={d.get('ctr', 'N/A')}%, "
-                    f"CPC={d.get('cpc', 'N/A')} €, "
-                    f"Conversions={d.get('conversions', 'N/A')}, "
-                    f"Impressions={d.get('impressions', 'N/A')}, "
-                    f"Klicks={d.get('clicks', 'N/A')}"
+            # Demographic data – seed on-the-fly if missing
+            demo = await AudienceDemographic.find_one(
+                AudienceDemographic.campaign_id == c.id
+            )
+            if not demo:
+                await seed_demographics_for_campaign(c.id)
+                demo = await AudienceDemographic.find_one(
+                    AudienceDemographic.campaign_id == c.id
+                )
+
+            demo_lines = ""
+            if demo:
+                locs = ", ".join(
+                    f"{p.split(':')[0]} ({p.split(':')[1]}%)" if ":" in p else p
+                    for p in demo.top_locations.split(",") if p
+                )
+                ints = ", ".join(
+                    f"{p.split(':')[0]} ({p.split(':')[1]}%)" if ":" in p else p
+                    for p in demo.top_interests.split(",") if p
+                )
+                demo_lines = (
+                    f"\n  Demografie:"
+                    f"\n    Alter:    18-24={demo.age_18_24}%  25-34={demo.age_25_34}%  35-44={demo.age_35_44}%  45-54={demo.age_45_54}%  55+={demo.age_55_plus}%"
+                    f"\n    Geschlecht: Männlich={demo.gender_male}%  Weiblich={demo.gender_female}%  Unbekannt={demo.gender_unknown}%"
+                    f"\n    Gerät:    Mobile={demo.device_mobile}%  Desktop={demo.device_desktop}%  Tablet={demo.device_tablet}%"
+                    f"\n    Top Städte: {locs}"
+                    f"\n    Top Interessen: {ints}"
                 )
 
             campaign_lines.append(
                 f"Kampagne \"{c.name}\" (Status: {c.status}):\n"
                 f"  7 Tage  ({start_7d} – {today}): {fmt(d7) if d7 else 'keine Daten'}\n"
                 f"  30 Tage ({start_30d} – {today}): {fmt(d30) if d30 else 'keine Daten'}"
+                + demo_lines
             )
 
         roas_7d = round(total_revenue_7d / total_spend_7d, 2) if total_spend_7d else 0
@@ -96,7 +127,7 @@ async def build_marketing_context() -> str:
             f"Letzte 7 Tage:  Ausgaben={total_spend_7d:.2f} €  Umsatz={total_revenue_7d:.2f} €  ROAS={roas_7d}x",
             f"Letzte 30 Tage: Ausgaben={total_spend_30d:.2f} €  Umsatz={total_revenue_30d:.2f} €  ROAS={roas_30d}x",
             "",
-            "=== KAMPAGNEN-DETAILS ===",
+            "=== KAMPAGNEN-DETAILS (inkl. Audience-Demografie) ===",
         ] + campaign_lines
 
         result = "\n".join(lines)

@@ -48,6 +48,59 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+function markdownToHtml(text: string): string {
+  if (!text) return "";
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inUl = false;
+  let inOl = false;
+
+  const closeList = () => {
+    if (inUl) { out.push("</ul>"); inUl = false; }
+    if (inOl) { out.push("</ol>"); inOl = false; }
+  };
+
+  const inline = (s: string) =>
+    s
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/`([^`]+)`/g, '<code class="bg-black/10 dark:bg-white/10 px-1 rounded text-[0.8em] font-mono">$1</code>')
+      .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    const ulM = line.match(/^[\s]*[-*] (.+)$/);
+    const olM = line.match(/^[\s]*\d+\.\s(.+)$/);
+    const h3 = line.match(/^### (.+)$/);
+    const h2 = line.match(/^## (.+)$/);
+    const h1 = line.match(/^# (.+)$/);
+    const hr = /^---+$/.test(line.trim());
+    const blank = line.trim() === "";
+
+    if (ulM) {
+      if (inOl) { out.push("</ol>"); inOl = false; }
+      if (!inUl) { out.push('<ul class="list-disc pl-5 my-1 space-y-0.5">'); inUl = true; }
+      out.push(`<li class="text-sm leading-relaxed">${inline(ulM[1])}</li>`);
+    } else if (olM) {
+      if (inUl) { out.push("</ul>"); inUl = false; }
+      if (!inOl) { out.push('<ol class="list-decimal pl-5 my-1 space-y-0.5">'); inOl = true; }
+      out.push(`<li class="text-sm leading-relaxed">${inline(olM[1])}</li>`);
+    } else {
+      closeList();
+      if (h3) out.push(`<p class="font-semibold text-sm mt-3 mb-0.5">${inline(h3[1])}</p>`);
+      else if (h2) out.push(`<p class="font-bold text-sm mt-3 mb-1">${inline(h2[1])}</p>`);
+      else if (h1) out.push(`<p class="font-bold mt-3 mb-1">${inline(h1[1])}</p>`);
+      else if (hr) out.push('<hr class="my-2 border-border opacity-40">');
+      else if (blank) out.push('<div class="h-2"></div>');
+      else out.push(`<p class="text-sm leading-relaxed">${inline(line)}</p>`);
+    }
+  }
+  closeList();
+  return out.join("");
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -497,11 +550,22 @@ export default function ChatPage() {
                             : "bg-muted"
                         )}
                       >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                          {message.content || (streaming && index === messages.length - 1 ? (
-                            <span className="animate-pulse">▊</span>
-                          ) : "")}
-                        </p>
+                        {message.role === "assistant" ? (
+                          message.content ? (
+                            <div
+                              className="text-sm leading-relaxed"
+                              dangerouslySetInnerHTML={{ __html: markdownToHtml(message.content) }}
+                            />
+                          ) : (
+                            streaming && index === messages.length - 1 ? (
+                              <span className="animate-pulse text-sm">▊</span>
+                            ) : null
+                          )
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {message.content}
+                          </p>
+                        )}
                         <div
                           className={cn(
                             "flex items-center gap-2 mt-1 text-xs",

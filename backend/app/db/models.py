@@ -277,6 +277,55 @@ class AnalysisResult(Document):
         ]
 
 
+class AudienceDemographic(Document):
+    """
+    Demographic breakdown for a campaign.
+    Stores percentage shares (0–100) for age, gender, device and top locations/interests.
+    """
+    campaign_id: str
+
+    # Age-group share of total impressions (%)
+    age_18_24: Decimal = Field(default=Decimal("0"))
+    age_25_34: Decimal = Field(default=Decimal("0"))
+    age_35_44: Decimal = Field(default=Decimal("0"))
+    age_45_54: Decimal = Field(default=Decimal("0"))
+    age_55_plus: Decimal = Field(default=Decimal("0"))
+
+    # Gender share (%)
+    gender_male: Decimal = Field(default=Decimal("0"))
+    gender_female: Decimal = Field(default=Decimal("0"))
+    gender_unknown: Decimal = Field(default=Decimal("0"))
+
+    # Device share (%)
+    device_mobile: Decimal = Field(default=Decimal("0"))
+    device_desktop: Decimal = Field(default=Decimal("0"))
+    device_tablet: Decimal = Field(default=Decimal("0"))
+
+    # Top 5 locations – stored as "City:pct,City:pct,…"
+    top_locations: str = Field(default="")
+
+    # Top 5 interest categories – stored as "Interest:pct,Interest:pct,…"
+    top_interests: str = Field(default="")
+
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @field_validator(
+        "age_18_24", "age_25_34", "age_35_44", "age_45_54", "age_55_plus",
+        "gender_male", "gender_female", "gender_unknown",
+        "device_mobile", "device_desktop", "device_tablet",
+        mode="before",
+    )
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Any:
+        return decimal128_to_decimal(v)
+
+    class Settings:
+        name = "audience_demographics"
+        indexes = [
+            [("campaign_id", 1)],
+        ]
+
+
 class User(Document):
     username: Indexed(str, unique=True)  # type: ignore
     email: Indexed(str, unique=True)  # type: ignore
