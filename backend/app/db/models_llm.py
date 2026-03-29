@@ -175,6 +175,12 @@ class Message(Document):
     tokens_used: Optional[int] = None
     cost: Optional[Decimal] = None
     llm_config_id: Optional[int] = None  # Which LLM config generated this
+
+    @field_validator("cost", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v):
+        return decimal128_to_decimal(v)
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Settings

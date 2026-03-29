@@ -57,6 +57,11 @@ class ConversationResponse(BaseModel):
     total_cost: float = 0.0
 
 
+class CreateConversationRequest(BaseModel):
+    """Request to create a new conversation"""
+    title: Optional[str] = Field(None, description="Optional title for the conversation")
+
+
 class StreamingMessage(BaseModel):
     """Streaming message chunk"""
     type: str  # "chunk", "complete", "error"
@@ -99,7 +104,7 @@ async def send_chat_message(
             )
             await conversation.save()
         else:
-            conversation = await Conversation.find_one({"id": conversation_id})
+            conversation = await Conversation.find_one(Conversation.id == conversation_id)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -276,7 +281,7 @@ async def chat_sse_stream(
             )
             await conversation.save()
         else:
-            conversation = await Conversation.find_one({"id": conversation_id})
+            conversation = await Conversation.find_one(Conversation.id == conversation_id)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -318,13 +323,19 @@ async def chat_sse_stream(
         if not provider:
             provider = list(llm_gateway.providers.keys())[0] if llm_gateway.providers else None
         
-        if not provider or provider not in llm_gateway.providers:
+        # Convert provider to string key
+        if hasattr(provider, 'value'):
+            provider_key = provider.value
+        else:
+            provider_key = str(provider)
+        
+        if not provider_key or provider_key not in llm_gateway.providers:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="No LLM provider available"
             )
         
-        provider_instance = llm_gateway.providers[provider]
+        provider_instance = llm_gateway.providers[provider_key]
         
         # Create AI message record (will be updated when stream completes)
         ai_message_id = str(uuid.uuid4())
@@ -338,7 +349,7 @@ async def chat_sse_stream(
                 # Send initial status
                 start_message = StreamingMessage(
                     type="status",
-                    content=f"Starting chat with {provider.value}",
+                    content=f"Starting chat with {str(provider)}",
                     message_id=ai_message_id,
                     conversation_id=conversation_id
                 )
@@ -433,6 +444,206 @@ async def chat_sse_stream(
         )
 
 
+@router.get("/stream")
+async def chat_stream_get(
+    message: str = Query(..., description="The user's message"),
+    conversation_id: Optional[str] = Query(None, description="Optional conversation ID"),
+    model: Optional[str] = Query(None, description="Specific model to use"),
+    temperature: Optional[float] = Query(0.7, ge=0.0, le=2.0, description="Temperature for generation"),
+    max_tokens: Optional[int] = Query(1000, description="Max tokens in response"),
+    db=Depends(get_db)
+):
+    """
+    Send a chat message and receive streaming response via Server-Sent Events (GET version)
+    
+    Args:
+        message: The user's message
+        conversation_id: Optional conversation ID
+        model: Specific model to use
+        temperature: Temperature for generation
+        max_tokens: Max tokens in response
+        
+    Returns:
+        Server-Sent Events stream with AI response
+    """
+    try:
+        from fastapi.responses import StreamingResponse
+        
+        # Get or create conversation
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+            conversation = Conversation(
+                id=conversation_id,
+                user_id="anonymous",
+                title=f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            await conversation.save()
+        else:
+            conversation = await Conversation.find_one(Conversation.id == conversation_id)
+            if not conversation:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Conversation {conversation_id} not found"
+                )
+        
+        # Save user message
+        user_message_id = str(uuid.uuid4())
+        user_message = Message(
+            id=user_message_id,
+            conversation_id=conversation_id,
+            role="user",
+            content=message,
+            created_at=datetime.utcnow()
+        )
+        await user_message.save()
+        
+        # Prepare chat request with streaming
+        chat_request = ChatCompletionRequest(
+            messages=[
+                ChatMessage(role="user", content=message)
+            ],
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True
+        )
+        
+        # Determine provider
+        provider = None
+        if model and "gpt" in model:
+            provider = LLMProvider.OPENAI
+        elif model and "kimi" in model:
+            provider = LLMProvider.KIMI
+        elif model and "deepseek" in model:
+            provider = LLMProvider.DEEPSEEK
+        
+        # Get the provider instance
+        if not provider:
+            provider = list(llm_gateway.providers.keys())[0] if llm_gateway.providers else None
+        
+        # Convert provider to string key
+        if hasattr(provider, 'value'):
+            provider_key = provider.value
+        else:
+            provider_key = str(provider)
+        
+        if not provider_key or provider_key not in llm_gateway.providers:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No LLM provider available"
+            )
+        
+        provider_instance = llm_gateway.providers[provider_key]
+        
+        # Create AI message record (will be updated when stream completes)
+        ai_message_id = str(uuid.uuid4())
+        
+        async def stream_generator():
+            try:
+                full_content = ""
+                chunk_count = 0
+                total_tokens = 0
+                
+                # Send initial status
+                start_message = StreamingMessage(
+                    type="status",
+                    content=f"Starting chat with {str(provider)}",
+                    message_id=ai_message_id,
+                    conversation_id=conversation_id
+                )
+                yield f"data: {json.dumps(start_message.dict())}\n\n"
+                
+                # Stream from LLM
+                async for chunk in provider_instance.chat_completion_stream(chat_request):
+                    full_content += chunk
+                    chunk_count += 1
+                    
+                    # Send chunk to client
+                    chunk_message = StreamingMessage(
+                        type="chunk",
+                        content=chunk,
+                        message_id=ai_message_id,
+                        conversation_id=conversation_id
+                    )
+                    yield f"data: {json.dumps(chunk_message.dict())}\n\n"
+                    
+                    # Small delay to prevent overwhelming the client
+                    await asyncio.sleep(0.01)
+                
+                # Get final token usage
+                if hasattr(provider_instance, 'last_usage'):
+                    total_tokens = provider_instance.last_usage
+                
+                # Save AI message to database
+                ai_message = Message(
+                    id=ai_message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_content,
+                    tokens_used=total_tokens,
+                    cost=0.0,  # TODO: Calculate
+                    created_at=datetime.utcnow()
+                )
+                await ai_message.save()
+                
+                # Update conversation
+                conversation.updated_at = datetime.utcnow()
+                await conversation.save()
+                
+                # Send completion message
+                completion_message = StreamingMessage(
+                    type="complete",
+                    content="Stream completed",
+                    message_id=ai_message_id,
+                    conversation_id=conversation_id
+                )
+                yield f"data: {json.dumps(completion_message.dict())}\n\n"
+                
+                # Send usage stats
+                usage_message = StreamingMessage(
+                    type="usage",
+                    content=f"Tokens used: {total_tokens}",
+                    message_id=ai_message_id,
+                    conversation_id=conversation_id
+                )
+                yield f"data: {json.dumps(usage_message.dict())}\n\n"
+                
+            except asyncio.CancelledError:
+                logger.info("Chat stream cancelled by client")
+                raise
+            except Exception as e:
+                logger.error(f"Stream generation error: {e}")
+                error_message = StreamingMessage(
+                    type="error",
+                    content=f"Error: {str(e)}",
+                    message_id=ai_message_id,
+                    conversation_id=conversation_id
+                )
+                yield f"data: {json.dumps(error_message.dict())}\n\n"
+        
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "X-Accel-Buffering": "no"  # Disable proxy buffering
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat stream error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start chat stream: {str(e)}"
+        )
+
+
 @router.get("/conversations/{conversation_id}/history", response_model=ConversationResponse)
 async def get_conversation_history(
     conversation_id: str,
@@ -449,7 +660,7 @@ async def get_conversation_history(
     """
     try:
         # Get conversation
-        conversation = await Conversation.find_one({"id": conversation_id})
+        conversation = await Conversation.get(conversation_id)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -496,29 +707,15 @@ async def get_conversation_history(
 
 
 @router.get("/conversations", response_model=List[Dict[str, Any]])
-async def list_conversations(
-    user_id: Optional[str] = Query(None, description="Filter by user"),
-    skip: int = Query(0, ge=0, description="Number to skip"),
-    limit: int = Query(50, ge=1, le=200, description="Max to return"),
-    db=Depends(get_db)
-):
+async def list_conversations(db=Depends(get_db)):
     """
     List all conversations for a user
     
-    Args:
-        user_id: Optional user ID filter
-        skip: Number to skip for pagination
-        limit: Max to return
-        
     Returns:
         List of conversations
     """
     try:
-        query = {}
-        if user_id:
-            query["user_id"] = user_id
-        
-        conversations = await Conversation.find(query).skip(skip).limit(limit).sort("updated_at", -1).to_list()
+        conversations = await Conversation.find_all().sort([("updated_at", -1)]).to_list()
         
         # Add message counts
         result = []
@@ -537,9 +734,119 @@ async def list_conversations(
         
     except Exception as e:
         logger.error(f"List conversations error: {e}")
+        # Return empty list for now to avoid breaking frontend
+        return []
+
+
+@router.post("/conversations", response_model=ConversationResponse)
+async def create_conversation(
+    request: CreateConversationRequest,
+    db=Depends(get_db)
+):
+    """
+    Create a new conversation
+    
+    Args:
+        request: Contains optional title
+        
+    Returns:
+        Newly created conversation
+    """
+    try:
+        conversation_id = str(uuid.uuid4())
+        title = request.title or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+        
+        conversation = Conversation(
+            id=conversation_id,
+            user_id="anonymous",  # TODO: Get from auth
+            title=title,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        await conversation.save()
+        
+        # Verify it was saved
+        saved = await Conversation.find_one({"id": conversation_id})
+        logger.info(f"✅ Created conversation: {conversation_id}, saved lookup: {saved}")
+        
+        return ConversationResponse(
+            id=conversation.id,
+            user_id=conversation.user_id,
+            title=conversation.title,
+            messages=[],
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
+            total_tokens=0,
+            total_cost=0.0
+        )
+        
+    except Exception as e:
+        logger.error(f"Create conversation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list conversations: {str(e)}"
+            detail=f"Failed to create conversation: {str(e)}"
+        )
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
+    conversation_id: str,
+    db=Depends(get_db)
+):
+    """
+    Get a conversation with all its messages
+    
+    Args:
+        conversation_id: Conversation ID
+        
+    Returns:
+        Conversation with all messages
+    """
+    try:
+        # Get conversation
+        conversation = await Conversation.get(conversation_id)
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conversation {conversation_id} not found"
+            )
+        
+        # Get all messages
+        messages = await Message.find({"conversation_id": conversation_id}).sort("created_at").to_list()
+        
+        # Calculate totals
+        total_tokens = sum((msg.tokens_used or 0) for msg in messages)
+        total_cost = sum((msg.cost or 0.0) for msg in messages)
+        
+        return ConversationResponse(
+            id=conversation.id,
+            user_id=conversation.user_id,
+            title=conversation.title,
+            messages=[
+                ChatMessageResponse(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    role=msg.role,
+                    content=msg.content,
+                    timestamp=msg.created_at,
+                    tokens_used=msg.tokens_used,
+                    cost=float(msg.cost) if msg.cost else 0.0
+                )
+                for msg in messages
+            ],
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
+            total_tokens=total_tokens,
+            total_cost=total_cost
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get conversation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load conversation: {str(e)}"
         )
 
 
@@ -558,7 +865,7 @@ async def delete_conversation(
         Success message
     """
     try:
-        conversation = await Conversation.find_one({"id": conversation_id})
+        conversation = await Conversation.get(conversation_id)
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -582,6 +889,39 @@ async def delete_conversation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete conversation: {str(e)}"
+        )
+
+
+@router.post("/conversations/{conversation_id}/clear", response_model=Dict[str, str])
+async def clear_conversation(
+    conversation_id: str,
+    db=Depends(get_db)
+):
+    """
+    Clear all messages in a conversation
+    """
+    try:
+        conversation = await Conversation.get(conversation_id)
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conversation {conversation_id} not found"
+            )
+        
+        # Delete all messages
+        await Message.find({"conversation_id": conversation_id}).delete()
+        
+        logger.info(f"✅ Cleared conversation: {conversation_id}")
+        
+        return {"status": "success", "message": f"Cleared conversation {conversation_id}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Clear conversation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear conversation: {str(e)}"
         )
 
 
