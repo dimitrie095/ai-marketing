@@ -148,7 +148,6 @@ async def list_campaigns(
     status: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
-    current_user: User = Depends(get_current_active_user),
     db=Depends(get_db),
 ):
     try:

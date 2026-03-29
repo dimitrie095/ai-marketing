@@ -149,8 +149,8 @@ export default function KPIComparisonPage() {
   const loadCampaigns = useCallback(async () => {
     try {
       const response = await getCampaigns();
-      if (response?.campaigns) {
-        setCampaigns(response.campaigns);
+      if (response?.data) {
+        setCampaigns(response.data);
       }
     } catch (err) {
       console.error('Fehler beim Laden der Kampagnen:', err);
