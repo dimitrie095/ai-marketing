@@ -40,6 +40,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { KPICard } from "@/components/dashboard/kpi-card";
 import { Campaign } from "@/types/campaign";
 import {
@@ -50,7 +52,7 @@ import {
   Users,
   Target,
   BarChart3,
-  Calendar,
+  Calendar as CalendarIcon,
   Edit,
   Copy,
   Download,
@@ -172,6 +174,7 @@ export default function CampaignDetailPage() {
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd'),
   });
+  const [datePreset, setDatePreset] = useState<string>("30");
   const [comparisonData, setComparisonData] = useState<ComparisonData | null>(null);
   const [compPrevPeriod, setCompPrevPeriod] = useState<{ start: string; end: string } | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -421,6 +424,14 @@ export default function CampaignDetailPage() {
     } catch (err) {
       console.error('Ads load error:', err);
     }
+  };
+
+  const applyPreset = (days: string) => {
+    setDatePreset(days);
+    setDateRange({
+      startDate: format(subDays(new Date(), Number(days)), 'yyyy-MM-dd'),
+      endDate: format(new Date(), 'yyyy-MM-dd'),
+    });
   };
 
   const handleExport = async () => {
@@ -1039,8 +1050,10 @@ export default function CampaignDetailPage() {
     );
   }
 
-  const roas = campaign.total_spend > 0 ? campaign.total_revenue / campaign.total_spend : 0;
-  const profit = campaign.total_revenue - campaign.total_spend;
+  const currentSpend = kpis?.spend ?? campaign.total_spend ?? 0;
+  const currentRevenue = kpis?.revenue ?? campaign.total_revenue ?? 0;
+  const roas = currentSpend > 0 ? currentRevenue / currentSpend : 0;
+  const profit = currentRevenue - currentSpend;
 
   // Previous period data for comparison
   const previousSpend = comparisonData?.spend || 0;
@@ -1048,8 +1061,8 @@ export default function CampaignDetailPage() {
   const previousRoas = previousSpend > 0 ? previousRevenue / previousSpend : 0;
   const previousProfit = previousRevenue - previousSpend;
 
-  const spendDelta = getDelta(campaign.total_spend, previousSpend);
-  const revenueDelta = getDelta(campaign.total_revenue, previousRevenue);
+  const spendDelta = getDelta(currentSpend, previousSpend);
+  const revenueDelta = getDelta(currentRevenue, previousRevenue);
   const roasDelta = getDelta(roas, previousRoas);
   const profitDelta = getDelta(profit, previousProfit);
 
@@ -1083,31 +1096,51 @@ export default function CampaignDetailPage() {
               </div>
             </div>
             {/* Date Range Picker */}
-            <div className="flex items-center gap-2 ml-12">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="start-date" className="text-sm">Von</Label>
-                <Input
-                  id="start-date"
-                  type="date"
-                  value={dateRange.startDate}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                  className="w-40"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="end-date" className="text-sm">Bis</Label>
-                <Input
-                  id="end-date"
-                  type="date"
-                  value={dateRange.endDate}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                  className="w-40"
-                />
-              </div>
-              <Button onClick={loadCampaignData} disabled={loading} size="sm">
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Anwenden
-              </Button>
+            <div className="flex items-center gap-2 ml-12 flex-wrap">
+              {[
+                { label: "7T",  value: "7"  },
+                { label: "14T", value: "14" },
+                { label: "30T", value: "30" },
+                { label: "90T", value: "90" },
+              ].map((p) => (
+                <Button
+                  key={p.value}
+                  variant={datePreset === p.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => applyPreset(p.value)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <CalendarIcon className="h-4 w-4" />
+                    {format(new Date(dateRange.startDate), "dd.MM.yy", { locale: de })} –{" "}
+                    {format(new Date(dateRange.endDate), "dd.MM.yy", { locale: de })}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="range"
+                    selected={{
+                      from: new Date(dateRange.startDate),
+                      to: new Date(dateRange.endDate),
+                    }}
+                    onSelect={(range) => {
+                      if (range?.from && range?.to) {
+                        setDatePreset("");
+                        setDateRange({
+                          startDate: format(range.from, 'yyyy-MM-dd'),
+                          endDate: format(range.to, 'yyyy-MM-dd'),
+                        });
+                      }
+                    }}
+                    locale={de}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
               <Button variant="outline" size="sm" onClick={async () => {
                 try {
                   const response = await exportAnalytics(
@@ -1380,7 +1413,7 @@ export default function CampaignDetailPage() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <KPICard
                 title="Gesamtausgaben"
-                value={`€${Number(campaign.total_spend || 0).toFixed(2)}`}
+                value={`€${Number(currentSpend).toFixed(2)}`}
                 description={`${dateRange.startDate} - ${dateRange.endDate}`}
                 trend={getTrendFromDelta(spendDelta)}
                 trendValue={formatDelta(spendDelta)}
@@ -1388,7 +1421,7 @@ export default function CampaignDetailPage() {
               />
               <KPICard
                 title="Umsatz"
-                value={`€${Number(campaign.total_revenue || 0).toFixed(2)}`}
+                value={`€${Number(currentRevenue).toFixed(2)}`}
                 description={`${dateRange.startDate} - ${dateRange.endDate}`}
                 trend={getTrendFromDelta(revenueDelta)}
                 trendValue={formatDelta(revenueDelta)}
@@ -1447,7 +1480,7 @@ export default function CampaignDetailPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Calendar className="h-5 w-5" />
+                    <CalendarIcon className="h-5 w-5" />
                     Kampagnen-Info
                   </CardTitle>
                 </CardHeader>

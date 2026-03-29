@@ -5,7 +5,7 @@ CRUD Endpoints für Campaigns, AdSets, Ads — DB only
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel
 import logging
@@ -61,6 +61,9 @@ class CampaignResponse(BaseModel):
     ad_sets_count: int = 0
     total_spend: float = 0.0
     total_revenue: float = 0.0
+    total_clicks: int = 0
+    total_impressions: int = 0
+    ctr: float = 0.0
 
     class Config:
         json_encoders = {Decimal: float}
@@ -113,13 +116,25 @@ async def _get_campaign_or_404(campaign_id: str) -> Campaign:
     return campaign
 
 
-async def _campaign_metrics(campaign_id: str) -> tuple[float, float]:
-    metrics = await Metric.find(
-        {"entity_type": "campaign", "entity_id": campaign_id}
-    ).to_list()
+async def _campaign_metrics(
+    campaign_id: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> tuple[float, float, int, int]:
+    query: dict = {"entity_type": "campaign", "entity_id": campaign_id}
+    if start_date or end_date:
+        date_filter: dict = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        query["date"] = date_filter
+    metrics = await Metric.find(query).to_list()
     spend = sum(float(m.spend) for m in metrics)
     revenue = sum(float(m.revenue) for m in metrics)
-    return spend, revenue
+    clicks = sum(m.clicks for m in metrics)
+    impressions = sum(m.impressions for m in metrics)
+    return spend, revenue, clicks, impressions
 
 
 # ============================================
@@ -131,6 +146,8 @@ async def list_campaigns(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     current_user: User = Depends(get_current_active_user),
     db=Depends(get_db),
 ):
@@ -145,7 +162,8 @@ async def list_campaigns(
         response_items = []
         for c in campaigns:
             ad_sets_count = await AdSet.find({"campaign_id": c.id}).count()
-            spend, revenue = await _campaign_metrics(c.id)
+            spend, revenue, clicks, impressions = await _campaign_metrics(c.id, start_date, end_date)
+            ctr = round((clicks / impressions) * 100, 2) if impressions > 0 else 0.0
             response_items.append(CampaignResponse(
                 id=c.id,
                 name=c.name,
@@ -157,6 +175,9 @@ async def list_campaigns(
                 ad_sets_count=ad_sets_count,
                 total_spend=spend,
                 total_revenue=revenue,
+                total_clicks=clicks,
+                total_impressions=impressions,
+                ctr=ctr,
             ))
 
         return {
@@ -185,7 +206,8 @@ async def get_campaign(
     try:
         campaign = await _get_campaign_or_404(campaign_id)
         ad_sets_count = await AdSet.find({"campaign_id": campaign_id}).count()
-        spend, revenue = await _campaign_metrics(campaign_id)
+        spend, revenue, clicks, impressions = await _campaign_metrics(campaign_id)
+        ctr = round((clicks / impressions) * 100, 2) if impressions > 0 else 0.0
 
         return {
             "status": "success",
@@ -200,6 +222,9 @@ async def get_campaign(
                 ad_sets_count=ad_sets_count,
                 total_spend=spend,
                 total_revenue=revenue,
+                total_clicks=clicks,
+                total_impressions=impressions,
+                ctr=ctr,
             ),
         }
     except HTTPException:

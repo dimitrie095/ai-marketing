@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import * as yup from "yup";
 import DOMPurify from 'dompurify';
+import { format, subDays } from "date-fns";
+import { de } from "date-fns/locale";
 import { withAuth } from '@/components/auth/ProtectedRoute';
 import { DashboardLayout } from "@/components/dashboard/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -36,7 +40,8 @@ import {
   Eye,
   AlertCircle,
   Search,
-  Filter
+  Filter,
+  CalendarIcon,
 } from "lucide-react";
 import { Campaign } from "@/types/campaign";
 import {
@@ -57,7 +62,7 @@ const campaignSchema = yup.object({
     .trim(),
   status: yup.string()
     .required('Status is required')
-    .oneOf(['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED'], 'Invalid status'),
+    .oneOf(['ACTIVE', 'PAUSED', 'ARCHIVED'], 'Invalid status'),
   objective: yup.string()
     .required('Objective is required')
     .oneOf(['CONVERSIONS', 'LEAD_GENERATION', 'TRAFFIC', 'AWARENESS', 'ENGAGEMENT'], 'Invalid objective'),
@@ -66,11 +71,11 @@ const campaignSchema = yup.object({
 interface CampaignWithMetrics extends Campaign {
   total_spend: number;
   total_revenue: number;
+  total_clicks: number;
+  total_impressions: number;
   ad_sets_count: number;
-  clicks?: number;
-  impressions?: number;
-  ctr?: number;
-  roas?: number;
+  ctr: number;
+  roas: number;
   version?: number;
 }
 
@@ -80,6 +85,11 @@ function CampaignsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
+    from: subDays(new Date(), 30),
+    to: new Date(),
+  });
+  const [datePreset, setDatePreset] = useState<string>("30");
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -97,7 +107,7 @@ function CampaignsPage() {
 
   useEffect(() => {
     loadCampaigns();
-  }, [statusFilter]);
+  }, [statusFilter, dateRange]);
 
   const loadCampaigns = async () => {
     try {
@@ -105,27 +115,17 @@ function CampaignsPage() {
       setError(null);
 
       const status = statusFilter !== "all" ? statusFilter : undefined;
-      const response = await getCampaigns(status);
+      const startDate = format(dateRange.from, "yyyy-MM-dd");
+      const endDate = format(dateRange.to, "yyyy-MM-dd");
+      const response = await getCampaigns(status, startDate, endDate);
 
       if (response.status === "success" || response.status === "no_data") {
         const campaignsData = response.data || [];
-        // Enrich with calculated metrics
-        const enriched = campaignsData.map((c: CampaignWithMetrics) => {
-          // Calculate CTR based on actual metrics if available
-          let ctr = 0;
-          if (c.clicks && c.impressions && c.impressions > 0) {
-            ctr = (c.clicks / c.impressions) * 100;
-          } else if (c.ad_sets_count && c.ad_sets_count > 0) {
-            // Fallback: estimate based on ad set count and ROAS if no click/impression data
-            ctr = Math.max(1.5, Math.min(4.5, (c.roas || 1) * 1.2));
-          }
-          
-          return {
-            ...c,
-            roas: c.total_spend > 0 ? c.total_revenue / c.total_spend : 0,
-            ctr: Number(ctr.toFixed(2)),
-          };
-        });
+        const enriched = campaignsData.map((c: any) => ({
+          ...c,
+          roas: c.total_spend > 0 ? c.total_revenue / c.total_spend : 0,
+          ctr: c.ctr ?? (c.total_impressions > 0 ? (c.total_clicks / c.total_impressions) * 100 : 0),
+        }));
         setCampaigns(enriched);
       } else {
         setError("Fehler beim Laden der Kampagnen");
@@ -252,6 +252,11 @@ function CampaignsPage() {
     setIsDeleteDialogOpen(true);
   };
 
+  const applyPreset = (days: string) => {
+    setDatePreset(days);
+    setDateRange({ from: subDays(new Date(), Number(days)), to: new Date() });
+  };
+
   const getStatusBadge = (status: string) => {
     const variants: Record<string, string> = {
       ACTIVE: "bg-green-500 hover:bg-green-600",
@@ -266,16 +271,27 @@ function CampaignsPage() {
     );
   };
 
+  const OBJECTIVE_LABELS: Record<string, string> = {
+    CONVERSIONS:     "Konversionen",
+    LEAD_GENERATION: "Lead-Generierung",
+    TRAFFIC:         "Traffic",
+    AWARENESS:       "Bekanntheit",
+    ENGAGEMENT:      "Interaktion",
+  };
+
+  const OBJECTIVE_COLORS: Record<string, string> = {
+    CONVERSIONS:     "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+    LEAD_GENERATION: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+    TRAFFIC:         "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    AWARENESS:       "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+    ENGAGEMENT:      "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
+  };
+
   const getObjectiveBadge = (objective?: string) => {
-    const colors: Record<string, string> = {
-      CONVERSIONS: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-      REACH: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-      LINK_CLICKS: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-    };
     if (!objective) return null;
     return (
-      <Badge variant="secondary" className={colors[objective] || "bg-gray-100 text-gray-800"}>
-        {objective}
+      <Badge variant="secondary" className={OBJECTIVE_COLORS[objective] || "bg-gray-100 text-gray-800"}>
+        {OBJECTIVE_LABELS[objective] || objective}
       </Badge>
     );
   };
@@ -359,8 +375,10 @@ function CampaignsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="CONVERSIONS">Konversionen</SelectItem>
-                      <SelectItem value="REACH">Reichweite</SelectItem>
-                      <SelectItem value="LINK_CLICKS">Link-Klicks</SelectItem>
+                      <SelectItem value="LEAD_GENERATION">Lead-Generierung</SelectItem>
+                      <SelectItem value="TRAFFIC">Traffic</SelectItem>
+                      <SelectItem value="AWARENESS">Bekanntheit</SelectItem>
+                      <SelectItem value="ENGAGEMENT">Interaktion</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -387,8 +405,9 @@ function CampaignsPage() {
         <Separator />
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Kampagnen suchen..."
@@ -397,10 +416,12 @@ function CampaignsPage() {
               className="pl-10"
             />
           </div>
+
+          {/* Status filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-[160px]">
                 <SelectValue placeholder="Status filtern" />
               </SelectTrigger>
               <SelectContent>
@@ -411,6 +432,50 @@ function CampaignsPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Date preset buttons */}
+          <div className="flex items-center gap-1">
+            {[
+              { label: "7T", value: "7" },
+              { label: "14T", value: "14" },
+              { label: "30T", value: "30" },
+              { label: "90T", value: "90" },
+            ].map((p) => (
+              <Button
+                key={p.value}
+                variant={datePreset === p.value ? "default" : "outline"}
+                size="sm"
+                onClick={() => applyPreset(p.value)}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+
+          {/* Custom date range picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <CalendarIcon className="h-4 w-4" />
+                {format(dateRange.from, "dd.MM.yy", { locale: de })} –{" "}
+                {format(dateRange.to, "dd.MM.yy", { locale: de })}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={{ from: dateRange.from, to: dateRange.to }}
+                onSelect={(range) => {
+                  if (range?.from && range?.to) {
+                    setDatePreset("");
+                    setDateRange({ from: range.from, to: range.to });
+                  }
+                }}
+                locale={de}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Campaigns Grid */}
@@ -459,7 +524,7 @@ function CampaignsPage() {
                       Ausgaben
                     </p>
                     <p className="text-lg font-semibold">
-                      €{campaign.total_spend?.toFixed(2) || "0.00"}
+                      €{campaign.total_spend.toFixed(2)}
                     </p>
                   </div>
                   <div className="space-y-1">
@@ -468,30 +533,35 @@ function CampaignsPage() {
                       Umsatz
                     </p>
                     <p className="text-lg font-semibold">
-                      €{campaign.total_revenue?.toFixed(2) || "0.00"}
+                      €{campaign.total_revenue.toFixed(2)}
                     </p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">ROAS</p>
                     <p className={`text-lg font-semibold ${
-                      (campaign.roas || 0) >= 2 ? "text-green-600" : "text-yellow-600"
+                      campaign.roas >= 2 ? "text-green-600" : "text-yellow-600"
                     }`}>
-                      {campaign.roas?.toFixed(2) || "0.00"}x
+                      {campaign.roas.toFixed(2)}x
                     </p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">AdSets</p>
-                    <p className="text-lg font-semibold">
-                      {campaign.ad_sets_count || 0}
-                    </p>
+                    <p className="text-sm text-muted-foreground">Profit</p>
+                    {(() => {
+                      const profit = campaign.total_revenue - campaign.total_spend;
+                      return (
+                        <p className={`text-lg font-semibold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                          €{profit.toFixed(2)}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
 
                 <Separator className="my-4" />
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Erstellt: {new Date(campaign.created_at).toLocaleDateString("de-DE")}</span>
-                  <span>CTR: {campaign.ctr?.toFixed(2) || "0.00"}%</span>
+                  <span>AdSets: {campaign.ad_sets_count}</span>
+                  <span>CTR: {campaign.ctr.toFixed(2)}% · {campaign.total_clicks.toLocaleString("de-DE")} Klicks</span>
                 </div>
               </CardContent>
             </Card>
