@@ -16,7 +16,8 @@ import {
   Menu,
   Home,
   TrendingUp,
-  Users
+  Users,
+  RefreshCw
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,6 +30,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <Home className="h-4 w-4" /> },
   { href: "/campaigns", label: "Kampagnen", icon: <ShoppingBag className="h-4 w-4" /> },
+  { href: "/etl", label: "ETL Operations", icon: <RefreshCw className="h-4 w-4" /> },
   { href: "/analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
   { href: "/kpi-comparison", label: "KPI Vergleich", icon: <TrendingUp className="h-4 w-4" /> },
   { href: "/audience", label: "Audience", icon: <Users className="h-4 w-4" /> },

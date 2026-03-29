@@ -34,6 +34,12 @@ except ImportError:
     pass
 
 try:
+    from .google import router as google_router
+    api_router.include_router(google_router, tags=["google"])
+except ImportError:
+    pass
+
+try:
     from .campaigns import router as campaigns_router
     api_router.include_router(campaigns_router, tags=["campaigns"])
 except ImportError:
