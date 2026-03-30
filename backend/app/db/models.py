@@ -326,6 +326,35 @@ class AudienceDemographic(Document):
         ]
 
 
+class Alert(Document):
+    """Alerts for KPI changes and anomalies"""
+    entity_type: str  # campaign, adset, ad
+    entity_id: str
+    entity_name: Optional[str] = None
+    alert_type: str  # KPI_DROP, ANOMALY, SPIKE
+    severity: str  # HIGH, MEDIUM, LOW
+    title: str
+    description: str
+    kpi_name: str
+    change_percent: Optional[float] = None
+    root_cause: Optional[str] = None
+    recommendation: Optional[str] = None
+    is_read: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "alerts"
+        indexes = [
+            [("entity_type", 1)],
+            [("entity_id", 1)],
+            [("severity", 1)],
+            [("is_read", 1)],
+            [("created_at", -1)],
+            [("alert_type", 1)],
+        ]
+
+
 class User(Document):
     username: Indexed(str, unique=True)  # type: ignore
     email: Indexed(str, unique=True)  # type: ignore

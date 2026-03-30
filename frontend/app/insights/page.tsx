@@ -122,6 +122,28 @@ export default function InsightsPage() {
     }
   };
 
+  const handleGenerateInsights = async () => {
+    setGeneratingInsights(true);
+    try {
+      const result = await fetchFromAPI('/api/v1/analytics/insights/generate', {
+        method: 'POST',
+        body: JSON.stringify({ count: 4 }),
+      });
+      if (result.status === 'success') {
+        setInsights(result.data);
+        // Optionally show success message
+      } else {
+        console.error('Failed to generate insights:', result.message);
+        alert('Fehler beim Generieren von Insights: ' + result.message);
+      }
+    } catch (error) {
+      console.error('Error generating insights:', error);
+      alert('Fehler beim Generieren von Insights. Bitte versuchen Sie es später erneut.');
+    } finally {
+      setGeneratingInsights(false);
+    }
+  };
+
   useEffect(() => {
     loadInsights();
   }, []);
@@ -172,6 +194,7 @@ export default function InsightsPage() {
   ]);
 
   const [generatingReport, setGeneratingReport] = useState<'daily' | 'weekly' | 'benchmark' | null>(null);
+  const [generatingInsights, setGeneratingInsights] = useState(false);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<InsightCard | null>(null);
 
@@ -264,24 +287,44 @@ export default function InsightsPage() {
                       {insights.length} Insights verfügbar
                     </p>
                   </div>
-                  <Button 
-                    onClick={loadInsights} 
-                    disabled={loadingInsights}
-                    variant="outline"
-                    size="sm"
-                  >
-                    {loadingInsights ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Lädt...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Insights aktualisieren
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={loadInsights} 
+                      disabled={loadingInsights}
+                      variant="outline"
+                      size="sm"
+                    >
+                      {loadingInsights ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Lädt...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Insights aktualisieren
+                        </>
+                      )}
+                    </Button>
+                    <Button 
+                      onClick={handleGenerateInsights} 
+                      disabled={generatingInsights || loadingInsights}
+                      variant="default"
+                      size="sm"
+                    >
+                      {generatingInsights ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Generiert...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Insights neu generieren
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

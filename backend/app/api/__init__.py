@@ -87,4 +87,10 @@ try:
 except ImportError:
     pass
 
+try:
+    from .alerts import router as alerts_router
+    api_router.include_router(alerts_router, tags=["Alerts"])
+except ImportError:
+    pass
+
 __all__ = ["api_router"]

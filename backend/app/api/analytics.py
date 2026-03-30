@@ -23,6 +23,16 @@ except ImportError as e:
     get_db = lambda: None
     print(f"DB import error: {e}")
 
+# Import LLM dependencies
+try:
+    from app.llm.base import llm_gateway, ChatCompletionRequest, ChatMessage
+    from app.llm.prompts import prompt_framework, PromptType
+    LLM_AVAILABLE = True
+except ImportError as e:
+    LLM_AVAILABLE = False
+    llm_gateway = None
+    print(f"LLM import error: {e}")
+
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 # Debug DB availability
@@ -268,6 +278,132 @@ async def calculate_summary_from_metrics(metrics) -> Dict[str, Any]:
         "avg_cvr": round(avg_cvr, 2),
         "profit": round(profit, 2)
     }
+
+
+async def generate_ai_insights(count: int = 4) -> List[Dict[str, Any]]:
+    """
+    Generate AI-powered insights based on recent marketing data.
+    Falls back to mock insights if LLM is not available.
+    """
+    from datetime import date, timedelta
+    import uuid
+    
+    # Use last 7 days of data
+    end_date = date.today()
+    start_date = end_date - timedelta(days=7)
+    
+    # Try to get real metrics from database
+    metrics = []
+    if DB_AVAILABLE:
+        try:
+            metrics = await get_metrics_from_db(start_date, end_date, None)
+        except Exception as e:
+            print(f"Error fetching metrics for AI insights: {e}")
+    
+    # If no metrics, fall back to mock insights
+    if not metrics:
+        print("No metrics available, falling back to mock insights")
+        return generate_mock_insights(count)
+    
+    # Calculate summary statistics
+    summary = await calculate_summary_from_metrics(metrics)
+    
+    # Prepare data for LLM
+    insights_data = {
+        "period": f"{start_date} to {end_date}",
+        "total_spend": f"€{summary['total_spend']:.2f}",
+        "total_revenue": f"€{summary['total_revenue']:.2f}",
+        "total_impressions": summary['total_impressions'],
+        "total_clicks": summary['total_clicks'],
+        "total_conversions": summary['total_conversions'],
+        "avg_ctr": f"{summary['avg_ctr']:.2f}%",
+        "avg_cpc": f"€{summary['avg_cpc']:.2f}",
+        "avg_roas": f"{summary['avg_roas']:.2f}",
+        "avg_cvr": f"{summary['avg_cvr']:.2f}%",
+        "profit": f"€{summary['profit']:.2f}",
+    }
+    
+    # Try to generate insights via LLM
+    if LLM_AVAILABLE and llm_gateway:
+        try:
+            # Construct a prompt for general marketing insights
+            prompt = f"""Du bist ein Marketing-Analyse Experte. Analysiere die aggregierten Marketing-KPIs für den Zeitraum {insights_data['period']}:
+
+- Gesamtausgaben: {insights_data['total_spend']}
+- Gesamterlös: {insights_data['total_revenue']}
+- Gewinn: {insights_data['profit']}
+- Impressionen: {insights_data['total_impressions']:,}
+- Klicks: {insights_data['total_clicks']:,}
+- Conversions: {insights_data['total_conversions']:,}
+- Durchschnittlicher CTR: {insights_data['avg_ctr']}
+- Durchschnittlicher CPC: {insights_data['avg_cpc']}
+- Durchschnittlicher ROAS: {insights_data['avg_roas']}
+- Durchschnittliche Conversion Rate: {insights_data['avg_cvr']}
+
+Bitte generiere {count} kurze, prägnante Insights (Erkenntnisse) basierend auf diesen Daten. Jedes Insight sollte folgendes Format haben:
+- Titel: Ein prägnanter Titel
+- Beschreibung: Eine kurze Beschreibung des Insights (1-2 Sätze)
+- Schweregrad: "high", "medium" oder "low" (basierend auf der Bedeutung für das Geschäft)
+- Metrik: Die primäre Metrik, um die es geht (z.B. "ROAS", "CTR", "Conversions")
+- Veränderung: Eine prozentuale Veränderung oder ein Trend (z.B. "+5%", "-12%", "stabil")
+- Richtung: "up" oder "down" (oder "stable")
+- Empfehlungen: 1-2 konkrete Empfehlungen als Liste
+
+Antworte ausschließlich im folgenden JSON-Format (Liste von Insights):
+[
+  {{
+    "id": "1",
+    "title": "Titel des Insights",
+    "description": "Beschreibung",
+    "severity": "high",
+    "metric": "ROAS",
+    "change": "+10%",
+    "direction": "up",
+    "recommendations": ["Empfehlung 1", "Empfehlung 2"],
+    "timestamp": "2023-10-05T14:30:00Z"
+  }}
+]
+
+Bitte verwende realistische Veränderungen basierend auf den Daten. Wenn keine Trends ersichtlich sind, generiere plausible Insights basierend auf typischen Marketing-Szenarien."""
+            
+            chat_request = ChatCompletionRequest(
+                messages=[
+                    ChatMessage(role="user", content=prompt)
+                ],
+                temperature=0.3,
+                max_tokens=2000
+            )
+            
+            response = await llm_gateway.chat_completion(chat_request)
+            analysis_text = response.choices[0]["message"]["content"]
+            
+            # Try to parse JSON
+            import json
+            import re
+            # Extract JSON from response (in case LLM adds extra text)
+            json_match = re.search(r'\[.*\]', analysis_text, re.DOTALL)
+            if json_match:
+                insights = json.loads(json_match.group())
+                # Ensure we have exactly count insights
+                insights = insights[:count]
+                # Add IDs and timestamps if missing
+                for i, insight in enumerate(insights):
+                    insight['id'] = insight.get('id', str(uuid.uuid4())[:8])
+                    if 'timestamp' not in insight:
+                        # Generate timestamp within last 24 hours
+                        from datetime import datetime, timedelta
+                        import random
+                        hours_ago = random.randint(1, 24)
+                        timestamp = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat() + "Z"
+                        insight['timestamp'] = timestamp
+                return insights
+            else:
+                print("LLM response did not contain valid JSON, falling back to mock insights")
+        except Exception as e:
+            print(f"Error generating AI insights: {e}")
+    
+    # Fallback to mock insights
+    return generate_mock_insights(count)
 
 
 @router.get("/summary")
@@ -1225,8 +1361,20 @@ async def get_insights(
     """
     Get AI-generated insights for marketing performance
     """
-    insights = generate_mock_insights(count)
+    insights = await generate_ai_insights(count)
     return {"status": "success", "data": insights}
+
+@router.post("/insights/generate")
+async def generate_insights(
+    count: int = Body(4, embed=True),
+    db=Depends(get_db)
+):
+    """
+    Generate new AI insights (regenerate)
+    """
+    insights = await generate_ai_insights(count)
+    return {"status": "success", "data": insights, "message": "Insights neu generiert"}
+
 
 @router.post("/analysis-results", response_model=Dict[str, Any])
 async def save_analysis_result(
