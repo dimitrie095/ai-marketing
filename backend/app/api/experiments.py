@@ -9,6 +9,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel
 import logging
+import random
 
 # Import database dependencies
 try:
@@ -69,6 +70,15 @@ class VariantCreateRequest(BaseModel):
 
     class Config:
         extra = "forbid"
+
+
+class VariantCreatePathRequest(BaseModel):
+    """Used for POST /{experiment_id}/variants — experiment_id comes from the path."""
+    name: str
+    config: Dict[str, Any] = {}
+
+    class Config:
+        extra = "allow"
 
 
 class VariantResultCreateRequest(BaseModel):
@@ -163,7 +173,7 @@ async def create_experiment(
         
         # DB is available, try to find campaign
         try:
-            campaign = await Campaign.find_one({"id": request.campaign_id})
+            campaign = await Campaign.find_one(Campaign.id == request.campaign_id)
         except Exception as e:
             logger.warning(f"Campaign lookup failed (DB error): {e}, falling back to mock")
             campaign = None
@@ -194,13 +204,61 @@ async def create_experiment(
         )
         await experiment.insert()
         logger.info(f"Experiment created: {experiment.id} for campaign {request.campaign_id}")
-        return {"status": "success", "data": experiment}
+        return {"status": "success", "data": {
+            "id": experiment.id,
+            "campaign_id": experiment.campaign_id,
+            "name": experiment.name,
+            "type": experiment.type,
+            "status": experiment.status,
+            "created_at": experiment.created_at,
+            "updated_at": experiment.updated_at,
+        }}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to create experiment: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
     # End of create_experiment
+
+
+@router.post("/{experiment_id}/variants", response_model=Dict[str, Any])
+async def create_variant_for_experiment(
+    experiment_id: str,
+    request: VariantCreatePathRequest,
+    db=Depends(get_db)
+):
+    """Create a variant directly under an experiment (no auth required for mock compat)."""
+    try:
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+                if experiment:
+                    variant = ExperimentVariant(
+                        experiment_id=experiment_id,
+                        name=request.name,
+                        config=request.config
+                    )
+                    await variant.insert()
+                    return {"status": "success", "data": {"id": variant.id, "experiment_id": experiment_id, "name": variant.name, "config": variant.config, "created_at": variant.created_at}}
+            except Exception as e:
+                logger.warning(f"DB variant creation failed: {e}")
+
+        # Mock fallback
+        mock = mock_experiments_storage.get(experiment_id)
+        if mock:
+            variant_id = f"var_mock_{int(datetime.utcnow().timestamp())}_{request.name}"
+            variant_data = {"id": variant_id, "experiment_id": experiment_id, "name": request.name, "config": request.config, "created_at": datetime.utcnow()}
+            if "variants" not in mock:
+                mock["variants"] = []
+            mock["variants"].append(variant_data)
+            return {"status": "success", "data": variant_data}
+
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/campaign/{campaign_id}", response_model=Dict[str, Any])
@@ -212,24 +270,35 @@ async def get_campaign_experiments(
     """
     logger.info(f"GET /campaign/{campaign_id} DB_AVAILABLE={DB_AVAILABLE}")
     
-    # Collect experiments from database if available
+    # Collect experiments from database if available, serialized as dicts
     db_experiments = []
     if DB_AVAILABLE:
         try:
-            db_experiments = await Experiment.find({"campaign_id": campaign_id}).to_list()
+            raw = await Experiment.find({"campaign_id": campaign_id}).to_list()
+            db_experiments = [
+                {
+                    "id": e.id,
+                    "campaign_id": e.campaign_id,
+                    "name": e.name,
+                    "type": e.type,
+                    "status": e.status,
+                    "created_at": e.created_at,
+                    "updated_at": e.updated_at,
+                }
+                for e in raw
+            ]
         except Exception as e:
             logger.error(f"Failed to fetch experiments from DB: {e}")
-            # Continue with empty DB experiments
             db_experiments = []
-    
+
     # Collect mock experiments for this campaign
     logger.info(f"Mock storage keys: {list(mock_experiments_storage.keys())}")
     mock_experiments = [exp for exp in mock_experiments_storage.values() if exp["campaign_id"] == campaign_id]
-    
+
     # Combine, avoiding duplicates by ID
     db_ids = {exp["id"] for exp in db_experiments}
     combined = db_experiments + [exp for exp in mock_experiments if exp["id"] not in db_ids]
-    
+
     logger.info(f"Returning {len(combined)} experiments ({len(db_experiments)} from DB, {len(mock_experiments)} mock) for campaign {campaign_id}")
     return {"status": "success", "data": combined}
 
@@ -244,8 +313,18 @@ async def get_experiment(
     Get experiment details with variants and latest results
     """
     try:
-        experiment = await Experiment.find_one({"id": experiment_id})
+        experiment = None
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+            except Exception:
+                pass
+
+        # Fall back to in-memory mock storage
         if not experiment:
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                return {"status": "success", "data": {"experiment": mock, "variants": [], "results": {}}}
             raise HTTPException(status_code=404, detail="Experiment not found")
 
         variants = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
@@ -281,8 +360,23 @@ async def update_experiment(
     Update experiment (name, status)
     """
     try:
-        experiment = await Experiment.find_one({"id": experiment_id})
+        experiment = None
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+            except Exception:
+                pass
+
+        # Fall back to mock storage
         if not experiment:
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                if request.name is not None:
+                    mock["name"] = request.name
+                if request.status is not None:
+                    mock["status"] = request.status
+                mock["updated_at"] = datetime.utcnow()
+                return {"status": "success", "data": mock}
             raise HTTPException(status_code=404, detail="Experiment not found")
 
         update_data = request.dict(exclude_unset=True)
@@ -310,8 +404,18 @@ async def delete_experiment(
     Delete experiment and its variants/results
     """
     try:
-        experiment = await Experiment.find_one({"id": experiment_id})
+        experiment = None
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+            except Exception:
+                pass
+
+        # Fall back to mock storage
         if not experiment:
+            if experiment_id in mock_experiments_storage:
+                del mock_experiments_storage[experiment_id]
+                return {"status": "success", "message": "Experiment deleted"}
             raise HTTPException(status_code=404, detail="Experiment not found")
 
         # Delete variants and results
@@ -330,6 +434,258 @@ async def delete_experiment(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@router.patch("/{experiment_id}/status", response_model=Dict[str, Any])
+async def update_experiment_status(
+    experiment_id: str,
+    status: str = Query(..., description="New status: running, paused, completed"),
+    db=Depends(get_db)
+):
+    """Update experiment status without requiring full auth."""
+    valid = {"running", "paused", "completed"}
+    if status not in valid:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {valid}")
+    try:
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+                if experiment:
+                    experiment.status = status
+                    experiment.updated_at = datetime.utcnow()
+                    await experiment.save()
+                    return {"status": "success", "data": experiment}
+            except Exception as e:
+                logger.warning(f"DB status update failed: {e}")
+
+        mock = mock_experiments_storage.get(experiment_id)
+        if mock:
+            mock["status"] = status
+            mock["updated_at"] = datetime.utcnow()
+            return {"status": "success", "data": mock}
+
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{experiment_id}/run", response_model=Dict[str, Any])
+async def run_experiment(
+    experiment_id: str,
+    db=Depends(get_db)
+):
+    """
+    Execute an experiment: auto-generate simulated metrics for all variants,
+    store the results, and return the summary.
+    """
+    try:
+        # 1. Fetch variants
+        variants = []
+        if DB_AVAILABLE:
+            try:
+                raw = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
+                variants = [{"id": str(v.id), "name": v.name} for v in raw]
+            except Exception as e:
+                logger.warning(f"DB variant fetch failed during run: {e}")
+
+        if not variants:
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                variants = [{"id": v.get("id", v["name"]), "name": v["name"]} for v in mock.get("variants", [])]
+
+        if not variants:
+            raise HTTPException(status_code=404, detail="Experiment oder Varianten nicht gefunden")
+
+        # 2. Generate simulated metrics per variant
+        #    Variant A = control (baseline), Variant B = test (random uplift/downlift)
+        base_impressions = random.randint(10000, 30000)
+        base_ctr = random.uniform(0.025, 0.07)
+        base_cvr = random.uniform(0.03, 0.10)
+        base_aov = random.uniform(45.0, 120.0)
+        base_cpc = random.uniform(0.35, 1.20)
+
+        generated = []
+        for i, variant in enumerate(variants):
+            if i == 0:
+                # Control: use base values
+                factor = 1.0
+            else:
+                # Test variant: random ±25%
+                factor = random.uniform(0.75, 1.30)
+
+            impressions = int(base_impressions * random.uniform(0.92, 1.08))
+            ctr = base_ctr * factor * random.uniform(0.95, 1.05)
+            clicks = max(1, int(impressions * ctr))
+            cvr = base_cvr * factor * random.uniform(0.95, 1.05)
+            conversions = max(0, int(clicks * cvr))
+            revenue = round(conversions * base_aov * random.uniform(0.90, 1.10), 2)
+            spend = round(clicks * base_cpc * random.uniform(0.90, 1.10), 2)
+
+            generated.append({
+                "variant_name": variant["name"],
+                "impressions": impressions,
+                "clicks": clicks,
+                "conversions": conversions,
+                "revenue": revenue,
+                "spend": spend,
+            })
+
+        # 3. Persist results
+        today = datetime.utcnow().date()
+        for item in generated:
+            vname = item["variant_name"]
+            if DB_AVAILABLE:
+                try:
+                    raw_v = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
+                    db_variant = next((v for v in raw_v if v.name == vname), None)
+                    if db_variant:
+                        existing = await ExperimentResult.find_one({"variant_id": db_variant.id})
+                        if existing:
+                            existing.impressions = item["impressions"]
+                            existing.clicks = item["clicks"]
+                            existing.conversions = item["conversions"]
+                            existing.revenue = Decimal(str(item["revenue"]))
+                            existing.spend = Decimal(str(item["spend"]))
+                            existing.updated_at = datetime.utcnow()
+                            await existing.save()
+                        else:
+                            res = ExperimentResult(
+                                variant_id=db_variant.id,
+                                start_date=today,
+                                end_date=today,
+                                impressions=item["impressions"],
+                                clicks=item["clicks"],
+                                conversions=item["conversions"],
+                                revenue=Decimal(str(item["revenue"])),
+                                spend=Decimal(str(item["spend"])),
+                            )
+                            await res.insert()
+                except Exception as e:
+                    logger.warning(f"DB result persist failed for {vname}: {e}")
+
+            # Always write to mock storage as fallback / override
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                if "results" not in mock:
+                    mock["results"] = {}
+                mock["results"][vname] = {**item, "updated_at": datetime.utcnow().isoformat()}
+
+        # 4. Update status to "running"
+        if DB_AVAILABLE:
+            try:
+                exp = await Experiment.find_one(Experiment.id == experiment_id)
+                if exp:
+                    exp.status = "running"
+                    exp.updated_at = datetime.utcnow()
+                    await exp.save()
+            except Exception as e:
+                logger.warning(f"DB status update failed: {e}")
+        mock = mock_experiments_storage.get(experiment_id)
+        if mock:
+            mock["status"] = "running"
+
+        return {
+            "status": "success",
+            "message": "Experiment wurde ausgeführt. Simulierte Ergebnisse generiert.",
+            "data": generated,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"run_experiment error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{experiment_id}/variants", response_model=Dict[str, Any])
+async def list_experiment_variants(
+    experiment_id: str,
+    db=Depends(get_db)
+):
+    """List all variants for an experiment."""
+    try:
+        variants = []
+        if DB_AVAILABLE:
+            try:
+                variants = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
+                variants = [{"id": v.id, "experiment_id": v.experiment_id, "name": v.name, "config": v.config, "created_at": v.created_at} for v in variants]
+            except Exception as e:
+                logger.warning(f"DB variant fetch failed: {e}")
+
+        if not variants:
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                variants = mock.get("variants", [])
+
+        return {"status": "success", "data": variants}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{experiment_id}/results/manual", response_model=Dict[str, Any])
+async def record_variant_result_manual(
+    experiment_id: str,
+    variant_name: str = Query(...),
+    impressions: int = Query(0),
+    clicks: int = Query(0),
+    conversions: int = Query(0),
+    revenue: float = Query(0.0),
+    spend: float = Query(0.0),
+    db=Depends(get_db)
+):
+    """Record manual metrics for a variant by name."""
+    try:
+        today = datetime.utcnow().date()
+        if DB_AVAILABLE:
+            try:
+                variants = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
+                variant = next((v for v in variants if v.name == variant_name), None)
+                if variant:
+                    existing = await ExperimentResult.find_one({"variant_id": variant.id})
+                    if existing:
+                        existing.impressions = impressions
+                        existing.clicks = clicks
+                        existing.conversions = conversions
+                        existing.revenue = Decimal(str(revenue))
+                        existing.spend = Decimal(str(spend))
+                        existing.updated_at = datetime.utcnow()
+                        await existing.save()
+                        return {"status": "success", "message": "Result updated"}
+                    else:
+                        result = ExperimentResult(
+                            variant_id=variant.id,
+                            start_date=today,
+                            end_date=today,
+                            impressions=impressions,
+                            clicks=clicks,
+                            conversions=conversions,
+                            revenue=Decimal(str(revenue)),
+                            spend=Decimal(str(spend))
+                        )
+                        await result.insert()
+                        return {"status": "success", "message": "Result recorded"}
+            except Exception as e:
+                logger.warning(f"DB result recording failed: {e}")
+
+        # Mock fallback
+        mock = mock_experiments_storage.get(experiment_id)
+        if mock:
+            if "results" not in mock:
+                mock["results"] = {}
+            mock["results"][variant_name] = {
+                "impressions": impressions, "clicks": clicks,
+                "conversions": conversions, "revenue": revenue, "spend": spend,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            return {"status": "success", "message": "Result recorded (mock)"}
+
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/variants", response_model=VariantResponse)
 async def create_variant(
     request: VariantCreateRequest,
@@ -341,7 +697,7 @@ async def create_variant(
     """
     try:
         # Verify experiment exists
-        experiment = await Experiment.find_one({"id": request.experiment_id})
+        experiment = await Experiment.find_one(Experiment.id == request.experiment_id)
         if not experiment:
             raise HTTPException(status_code=404, detail="Experiment not found")
 
@@ -388,7 +744,7 @@ async def create_result(
     """
     try:
         # Verify variant exists
-        variant = await ExperimentVariant.find_one({"id": request.variant_id})
+        variant = await ExperimentVariant.find_one(ExperimentVariant.id == request.variant_id)
         if not variant:
             raise HTTPException(status_code=404, detail="Variant not found")
 
@@ -429,7 +785,7 @@ async def calculate_results_from_metrics(
     Variant config must contain 'ad_id' to fetch metrics.
     """
     try:
-        experiment = await Experiment.find_one({"id": experiment_id})
+        experiment = await Experiment.find_one(Experiment.id == experiment_id)
         if not experiment:
             raise HTTPException(status_code=404, detail="Experiment not found")
 
@@ -524,13 +880,79 @@ async def get_experiment_summary(
     Calculate experiment summary: KPIs per variant, winner, significance
     """
     try:
-        experiment = await Experiment.find_one({"id": experiment_id})
+        experiment = None
+        if DB_AVAILABLE:
+            try:
+                experiment = await Experiment.find_one(Experiment.id == experiment_id)
+            except Exception:
+                pass
+
+        # Fall back to in-memory mock storage
         if not experiment:
+            mock = mock_experiments_storage.get(experiment_id)
+            if mock:
+                mock_variants = mock.get("variants", [])
+                mock_results = mock.get("results", {})
+                variant_summaries = []
+                for v in mock_variants:
+                    r = mock_results.get(v["name"], {})
+                    imp = r.get("impressions", 0)
+                    clk = r.get("clicks", 0)
+                    conv = r.get("conversions", 0)
+                    rev = float(r.get("revenue", 0))
+                    spd = float(r.get("spend", 0))
+                    ctr = clk / imp * 100 if imp > 0 else 0
+                    cvr = conv / clk * 100 if clk > 0 else 0
+                    roas = rev / spd if spd > 0 else 0
+                    variant_summaries.append({
+                        "variant_id": v.get("id", v["name"]),
+                        "variant_name": v["name"],
+                        "impressions": imp,
+                        "clicks": clk,
+                        "conversions": conv,
+                        "revenue": rev,
+                        "spend": spd,
+                        "ctr": ctr,
+                        "cvr": cvr,
+                        "roas": roas,
+                    })
+                winner_name = None
+                winner_roas = None
+                if len(variant_summaries) >= 2:
+                    w = max(variant_summaries, key=lambda x: x["roas"])
+                    winner_name = w["variant_name"]
+                    winner_roas = w["roas"]
+                return {
+                    "status": "success",
+                    "data": {
+                        "experiment_id": experiment_id,
+                        "experiment_name": mock["name"],
+                        "status": mock["status"],
+                        "variants": variant_summaries,
+                        "winner": winner_name,
+                        "winner_roas": winner_roas,
+                        "note": None if variant_summaries else "Dieses Experiment hat noch keine Varianten oder Ergebnisse.",
+                        "calculated_at": datetime.utcnow(),
+                    }
+                }
             raise HTTPException(status_code=404, detail="Experiment not found")
 
         variants = await ExperimentVariant.find({"experiment_id": experiment_id}).to_list()
         if len(variants) < 2:
-            raise HTTPException(status_code=400, detail="Experiment must have at least two variants")
+            # Return empty summary instead of error, so UI can show a meaningful state
+            return {
+                "status": "success",
+                "data": {
+                    "experiment_id": experiment_id,
+                    "experiment_name": experiment.name,
+                    "status": experiment.status,
+                    "variants": [],
+                    "winner": None,
+                    "winner_roas": None,
+                    "note": "Noch nicht genug Varianten für eine Auswertung (mind. 2 benötigt).",
+                    "calculated_at": datetime.utcnow(),
+                }
+            }
 
         variant_summaries = []
         for variant in variants:
@@ -577,13 +999,16 @@ async def get_experiment_summary(
             winner_roas = None
 
         return {
-            "experiment_id": experiment_id,
-            "experiment_name": experiment.name,
-            "status": experiment.status,
-            "variants": variant_summaries,
-            "winner": winner_variant_name,
-            "winner_roas": winner_roas,
-            "calculated_at": datetime.utcnow()
+            "status": "success",
+            "data": {
+                "experiment_id": experiment_id,
+                "experiment_name": experiment.name,
+                "status": experiment.status,
+                "variants": variant_summaries,
+                "winner": winner_variant_name,
+                "winner_roas": winner_roas,
+                "calculated_at": datetime.utcnow(),
+            }
         }
     except HTTPException:
         raise

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -20,9 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus } from "lucide-react";
-import { createExperiment, APIError } from "@/lib/api";
+import { Plus, ChevronRight, ChevronLeft, FlaskConical } from "lucide-react";
+import { fetchFromAPI } from "@/lib/api";
 
 interface CreateExperimentDialogProps {
   campaignId: string;
@@ -30,70 +32,77 @@ interface CreateExperimentDialogProps {
   trigger?: React.ReactNode;
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  creative: "Creative Test (Anzeigenbilder / Texte)",
+  audience: "Audience Test (Zielgruppen)",
+  budget: "Budget Test (Budgetverteilung)",
+};
+
 export function CreateExperimentDialog({
   campaignId,
   onSuccess,
   trigger,
 }: CreateExperimentDialogProps) {
   const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
     name: "",
     type: "creative",
-    status: "running",
+    variantAName: "Variante A",
+    variantADesc: "",
+    variantBName: "Variante B",
+    variantBDesc: "",
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const reset = () => {
+    setForm({ name: "", type: "creative", variantAName: "Variante A", variantADesc: "", variantBName: "Variante B", variantBDesc: "" });
+    setStep(1);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) return;
     try {
       setLoading(true);
-      const response = await createExperiment({
-        campaign_id: campaignId,
-        name: formData.name,
-        type: formData.type,
-        status: formData.status,
-      });
 
-      if (response.status === "success") {
-        toast({
-          title: "Experiment created",
-          description: `Experiment "${formData.name}" has been created successfully.`,
-          variant: "success",
-        });
-        setOpen(false);
-        setFormData({ name: "", type: "creative", status: "running" });
-        if (onSuccess) onSuccess();
-      } else {
-        throw new Error(response.message || "Failed to create experiment");
-      }
-    } catch (error) {
-      console.error("Create experiment error:", error);
-      let description = "Failed to create experiment";
-      if (error instanceof APIError) {
-        if (error.statusCode === 401 || error.statusCode === 403) {
-          description = "Authentication required. Please log in.";
-        } else if (error.statusCode === 404) {
-          description = "API endpoint not found. Please check backend server.";
-        } else {
-          description = error.message || `Server error: ${error.statusCode}`;
-        }
-      } else if (error instanceof Error) {
-        description = error.message;
-      }
-      toast({
-        title: "Error",
-        description,
-        variant: "destructive",
+      // 1. Create experiment
+      const expRes = await fetchFromAPI("/api/v1/experiments", {
+        method: "POST",
+        body: JSON.stringify({ campaign_id: campaignId, name: form.name, type: form.type, status: "running" }),
       });
+      if (expRes.status !== "success") throw new Error(expRes.message || "Fehler beim Erstellen");
+
+      const experimentId: string = expRes.data?.id;
+
+      if (!experimentId) throw new Error("Experiment-ID fehlt in der Antwort");
+
+      // 2. Create variants (experiment_id comes from path, not body)
+      await Promise.all([
+        fetchFromAPI(`/api/v1/experiments/${experimentId}/variants`, {
+          method: "POST",
+          body: JSON.stringify({ name: form.variantAName, config: { description: form.variantADesc } }),
+        }),
+        fetchFromAPI(`/api/v1/experiments/${experimentId}/variants`, {
+          method: "POST",
+          body: JSON.stringify({ name: form.variantBName, config: { description: form.variantBDesc } }),
+        }),
+      ]);
+
+      toast({ title: "Experiment erstellt", description: `"${form.name}" wurde erfolgreich gestartet.`, variant: "success" });
+      setOpen(false);
+      reset();
+      onSuccess?.();
+    } catch (err: any) {
+      toast({ title: "Fehler", description: err.message || "Unbekannter Fehler", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
       <DialogTrigger asChild>
         {trigger || (
           <Button>
@@ -102,78 +111,130 @@ export function CreateExperimentDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create Experiment</DialogTitle>
-            <DialogDescription>
-              Create a new A/B test for this campaign.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FlaskConical className="h-5 w-5" />
+            {step === 1 ? "Experiment anlegen" : "Varianten konfigurieren"}
+          </DialogTitle>
+          <DialogDescription>
+            {step === 1
+              ? "Geben Sie dem Experiment einen Namen und wählen Sie den Testtyp."
+              : "Definieren Sie die zwei Varianten (A und B) des Tests."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex gap-2 mb-2">
+          {[1, 2].map((s) => (
+            <div
+              key={s}
+              className={`h-1.5 flex-1 rounded-full transition-colors ${s <= step ? "bg-primary" : "bg-muted"}`}
+            />
+          ))}
+        </div>
+
+        {step === 1 && (
+          <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="name">Experiment Name</Label>
+              <Label htmlFor="exp-name">Name des Experiments</Label>
               <Input
-                id="name"
-                placeholder="e.g., Creative Test Q1"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                required
+                id="exp-name"
+                placeholder="z.B. Creative Test Q2 2026"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                autoFocus
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="type">Test Type</Label>
-              <Select
-                value={formData.type}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, type: value })
-                }
-              >
+              <Label>Testtyp</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="creative">Creative Test</SelectItem>
-                  <SelectItem value="audience">Audience Test</SelectItem>
-                  <SelectItem value="budget">Budget Test</SelectItem>
+                  {Object.entries(TYPE_LABELS).map(([v, l]) => (
+                    <SelectItem key={v} value={v}>{l}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="running">Running</SelectItem>
-                  <SelectItem value="paused">Paused</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
+              <p className="text-xs text-muted-foreground">{TYPE_LABELS[form.type]}</p>
             </div>
           </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={loading}
-            >
-              Cancel
+        )}
+
+        {step === 2 && (
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              {/* Variant A */}
+              <div className="space-y-3 border rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Badge variant="default">A</Badge>
+                  <span className="font-medium text-sm">Kontrollgruppe</span>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Name</Label>
+                  <Input
+                    value={form.variantAName}
+                    onChange={(e) => setForm({ ...form, variantAName: e.target.value })}
+                    placeholder="Variante A"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Beschreibung</Label>
+                  <Textarea
+                    value={form.variantADesc}
+                    onChange={(e) => setForm({ ...form, variantADesc: e.target.value })}
+                    placeholder="Was wird bei dieser Variante getestet?"
+                    className="resize-none h-20 text-sm"
+                  />
+                </div>
+              </div>
+              {/* Variant B */}
+              <div className="space-y-3 border rounded-lg p-3 border-primary/30 bg-primary/5">
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">B</Badge>
+                  <span className="font-medium text-sm">Testvariante</span>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Name</Label>
+                  <Input
+                    value={form.variantBName}
+                    onChange={(e) => setForm({ ...form, variantBName: e.target.value })}
+                    placeholder="Variante B"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Beschreibung</Label>
+                  <Textarea
+                    value={form.variantBDesc}
+                    onChange={(e) => setForm({ ...form, variantBDesc: e.target.value })}
+                    placeholder="Was unterscheidet diese Variante?"
+                    className="resize-none h-20 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2">
+          {step === 2 && (
+            <Button variant="outline" onClick={() => setStep(1)} disabled={loading}>
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Zurück
             </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Experiment"}
+          )}
+          {step === 1 ? (
+            <Button onClick={() => setStep(2)} disabled={!form.name.trim()}>
+              Weiter
+              <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
-          </DialogFooter>
-        </form>
+          ) : (
+            <Button onClick={handleSubmit} disabled={loading || !form.variantAName.trim() || !form.variantBName.trim()}>
+              {loading ? "Wird erstellt..." : "Experiment starten"}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
