@@ -33,6 +33,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useAlertDialog } from "@/hooks/use-alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -226,6 +228,7 @@ export default function CampaignDetailPage() {
   const [adSetAction, setAdSetAction] = useState<{ id: string; name: string; type: 'pause' | 'delete' } | null>(null);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+  const { alertDialogProps, showAlert } = useAlertDialog();
   
   // Form states
   const [formData, setFormData] = useState({
@@ -884,7 +887,11 @@ export default function CampaignDetailPage() {
   };
 
   const handleBudgetUpdate = async () => {
-    alert("Budget-Änderung ist derzeit nur auf AdSet-Ebene möglich. Bitte passen Sie das Budget im AdSet-Tab an.");
+    showAlert({
+      title: "Info",
+      description: "Budget-Änderung ist derzeit nur auf AdSet-Ebene möglich. Bitte passen Sie das Budget im AdSet-Tab an.",
+      variant: "info",
+    });
     setIsBudgetDialogOpen(false);
     setNewBudget(0);
   };
@@ -2743,6 +2750,7 @@ export default function CampaignDetailPage() {
           </DialogContent>
         </Dialog>
 
+        <AlertDialog {...alertDialogProps} />
       </div>
     </DashboardLayout>
   );

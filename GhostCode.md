@@ -32,3 +32,26 @@
 - Bleibt Professionel und effizient
 
 - Wenn du etwas nicht weißt, benutzt web search tool
+
+# Neue Toast-Komponente
+
+Für jede Benutzeraktion (Erstellen, Bearbeiten, Löschen) wird jetzt ein Toast mit entsprechendem Namen und Farbe angezeigt.
+
+- **Toast-Komponente:** `components/ui/toast.tsx`
+- **Hook:** `hooks/use-toast.ts`
+- **Provider:** bereits in `app/layout.tsx` integriert
+
+**Verwendung:**
+```tsx
+import { useToast } from "@/hooks/use-toast";
+
+const { toast } = useToast();
+
+toast({
+  title: "Erfolg",
+  description: "Aktion erfolgreich durchgeführt.",
+  variant: "success", // "default" | "destructive" | "success" | "warning" | "info"
+});
+```
+
+Die Kampagnen-Seite zeigt bereits Toasts für Create, Update und Delete an.

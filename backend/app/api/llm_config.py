@@ -12,8 +12,18 @@ from app.db.session import get_db
 from app.db.models_llm import LLMProvider, LLMConfig
 from app.llm import LLMProvider as LLMProviderEnum, llm_gateway, config_manager
 import logging
+import logging.handlers
 
 logger = logging.getLogger(__name__)
+# Create a separate file logger for debugging
+debug_logger = logging.getLogger('llm_config_debug')
+debug_logger.setLevel(logging.INFO)
+if not debug_logger.handlers:
+    fh = logging.FileHandler('llm_config_debug.log', encoding='utf-8')
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    debug_logger.addHandler(fh)
 
 router = APIRouter(prefix="/llm/config", tags=["LLM Config"])
 
@@ -276,6 +286,7 @@ async def create_config(request: LLMConfigCreateRequest, db=Depends(get_db)):
 @router.put("/{config_id}", response_model=Dict[str, Any])
 async def update_config(config_id: int, request: LLMConfigUpdateRequest, db=Depends(get_db)):
     try:
+        debug_logger.info(f"Update config {config_id} with data: {request.dict()}")
         config = await LLMConfig.get(config_id)
         if not config:
             raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
@@ -292,20 +303,42 @@ async def update_config(config_id: int, request: LLMConfigUpdateRequest, db=Depe
             config.temperature = Decimal(str(request.temperature))
         if request.top_p is not None:
             config.top_p = Decimal(str(request.top_p))
-        if request.is_default is not None and request.is_default:
-            existing_default = await LLMConfig.find_one(LLMConfig.is_default == True, LLMConfig.id != config_id)
-            if existing_default:
-                existing_default.is_default = False
-                await existing_default.save()
-            config.is_default = True
+        debug_logger.info(f"request.is_default value: {request.is_default}, type: {type(request.is_default)}")
+        if request.is_default is not None:
+            logger.info(f"Updating is_default for config {config_id}: {request.is_default} (current: {config.is_default})")
+            debug_logger.info(f"Updating is_default for config {config_id}: {request.is_default} (current: {config.is_default})")
+            if request.is_default:
+                # Set this config as default, unset any existing default
+                existing_default = await LLMConfig.find_one(LLMConfig.is_default == True, LLMConfig.id != config_id)
+                if existing_default:
+                    existing_default.is_default = False
+                    await existing_default.save()
+                config.is_default = True
+                debug_logger.info(f"Set config {config_id} as default")
+            else:
+                # Set this config as non-default
+                # Check if there is another default config
+                other_default = await LLMConfig.find_one(LLMConfig.is_default == True, LLMConfig.id != config_id)
+                if not other_default:
+                    logger.warning(f"Config {config_id} is the last default, but still allowing to unset.")
+                    debug_logger.warning(f"Config {config_id} is the last default, but still allowing to unset.")
+                config.is_default = False
+                logger.info(f"Set config {config_id} is_default to False")
+                debug_logger.info(f"Set config {config_id} is_default to False")
+                # Immediate save to ensure the change is persisted
+                await config.save()
+                debug_logger.info(f"Immediate save done for config {config_id}, is_default now {config.is_default}")
         if request.cost_per_1k_input_tokens is not None:
             config.cost_per_1k_input_tokens = Decimal(str(request.cost_per_1k_input_tokens))
         if request.cost_per_1k_output_tokens is not None:
             config.cost_per_1k_output_tokens = Decimal(str(request.cost_per_1k_output_tokens))
 
         config.updated_at = datetime.utcnow()
+        logger.info(f"Before save: config.is_default={config.is_default}")
+        debug_logger.info(f"Before save: config.is_default={config.is_default}")
         await config.save()
-        logger.info(f"✅ Config updated: {config.id} - {config.name}")
+        logger.info(f"✅ Config updated: {config.id} - {config.name}, is_default={config.is_default}")
+        debug_logger.info(f"✅ Config updated: {config.id} - {config.name}, is_default={config.is_default}")
 
         return {"status": "success", "message": "Konfiguration erfolgreich aktualisiert", "data": _config_to_dict(config)}
     except HTTPException:

@@ -12,6 +12,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useAlertDialog } from "@/hooks/use-alert-dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -163,6 +165,7 @@ export default function SettingsPage() {
   const [isEditOpen, setIsEditOpen]     = useState(false);
   const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
   const [testingId, setTestingId]       = useState<number | null>(null);
+  const { alertDialogProps, showAlert, showConfirm } = useAlertDialog();
 
   // form
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
@@ -266,7 +269,14 @@ export default function SettingsPage() {
   };
 
   const handleDeleteConfig = async (id: number) => {
-    if (!confirm("Konfiguration wirklich löschen?")) return;
+    const confirmed = await showConfirm({
+      title: "Konfiguration löschen",
+      description: "Konfiguration wirklich löschen?",
+      variant: "warning",
+      confirmText: "Löschen",
+      cancelText: "Abbrechen",
+    });
+    if (!confirmed) return;
     try {
       await deleteLLMConfig(id);
       showSuccess("Konfiguration gelöscht");
@@ -304,12 +314,24 @@ export default function SettingsPage() {
       setTestingId(id);
       const res = await testLLMConfig(id);
       if (res.status === "success") {
-        alert(`✅ Test erfolgreich!\nAntwort: ${res.response?.slice(0, 100)}...\nLatency: ${res.latency_ms}ms`);
+        showAlert({
+          title: "Test erfolgreich",
+          description: `Antwort: ${res.response?.slice(0, 100)}...\nLatency: ${res.latency_ms}ms`,
+          variant: "success",
+        });
       } else {
-        alert(`❌ Test fehlgeschlagen: ${res.detail}`);
+        showAlert({
+          title: "Test fehlgeschlagen",
+          description: res.detail || "Unbekannter Fehler",
+          variant: "error",
+        });
       }
     } catch (err: any) {
-      alert(`❌ Test fehlgeschlagen: ${extractError(err, "Unbekannter Fehler")}`);
+      showAlert({
+        title: "Test fehlgeschlagen",
+        description: extractError(err, "Unbekannter Fehler"),
+        variant: "error",
+      });
     } finally {
       setTestingId(null);
     }
@@ -367,7 +389,14 @@ export default function SettingsPage() {
   };
 
   const handleDeleteAdsConfig = async (id: string) => {
-    if (!confirm("Ads Konfiguration wirklich löschen?")) return;
+    const confirmed = await showConfirm({
+      title: "Ads Konfiguration löschen",
+      description: "Ads Konfiguration wirklich löschen?",
+      variant: "warning",
+      confirmText: "Löschen",
+      cancelText: "Abbrechen",
+    });
+    if (!confirmed) return;
     try {
       await deleteAdsConfig(id);
       showSuccess("Ads Konfiguration gelöscht");
@@ -452,6 +481,7 @@ export default function SettingsPage() {
         <div className="flex items-center justify-center h-full">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
+        <AlertDialog {...alertDialogProps} />
       </DashboardLayout>
     );
   }
@@ -1034,6 +1064,7 @@ export default function SettingsPage() {
           </DialogContent>
         </Dialog>
 
+        <AlertDialog {...alertDialogProps} />
       </div>
     </DashboardLayout>
   );

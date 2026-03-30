@@ -43,6 +43,7 @@ import {
   Filter,
   CalendarIcon,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { Campaign } from "@/types/campaign";
 import {
   getCampaigns,
@@ -90,6 +91,7 @@ function CampaignsPage() {
     to: new Date(),
   });
   const [datePreset, setDatePreset] = useState<string>("30");
+  const { toast } = useToast();
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -162,6 +164,11 @@ function CampaignsPage() {
         setFormData({ id: "", name: "", status: "ACTIVE", objective: "CONVERSIONS" });
         setError(null);
         loadCampaigns();
+        toast({
+          title: "Kampagne erstellt",
+          description: `Die Kampagne "${DOMPurify.sanitize(formData.name)}" wurde erfolgreich erstellt.`,
+          variant: "success",
+        });
       } else {
         throw new Error(response.message || "Erstellen fehlgeschlagen");
       }
@@ -203,6 +210,11 @@ function CampaignsPage() {
         setSelectedCampaign(null);
         setError(null);
         loadCampaigns();
+        toast({
+          title: "Kampagne aktualisiert",
+          description: `Die Kampagne "${DOMPurify.sanitize(formData.name)}" wurde erfolgreich aktualisiert.`,
+          variant: "success",
+        });
       } else if (response.status === "conflict") {
         setError("Kampagne wurde inzwischen geändert. Bitte aktualisieren und erneut versuchen.");
         loadCampaigns(); // Refresh data
@@ -228,6 +240,11 @@ function CampaignsPage() {
         setIsDeleteDialogOpen(false);
         setSelectedCampaign(null);
         loadCampaigns();
+        toast({
+          title: "Kampagne gelöscht",
+          description: `Die Kampagne "${selectedCampaign.name}" wurde erfolgreich gelöscht.`,
+          variant: "destructive",
+        });
       } else {
         setError("Fehler beim Löschen der Kampagne");
       }

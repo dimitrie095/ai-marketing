@@ -14,6 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useAlertDialog } from "@/hooks/use-alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -137,6 +139,7 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [insightPanelOpen, setInsightPanelOpen] = useState(true);
   const [insights, setInsights] = useState<InsightData | undefined>(undefined);
+  const { alertDialogProps, showConfirm } = useAlertDialog();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -217,7 +220,14 @@ export default function ChatPage() {
 
   const handleDeleteConversation = async (conversationId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Möchten Sie diese Konversation wirklich löschen?")) return;
+    const confirmed = await showConfirm({
+      title: "Konversation löschen",
+      description: "Möchten Sie diese Konversation wirklich löschen?",
+      variant: "warning",
+      confirmText: "Löschen",
+      cancelText: "Abbrechen",
+    });
+    if (!confirmed) return;
     
     try {
       await deleteConversation(conversationId);
@@ -234,7 +244,14 @@ export default function ChatPage() {
 
   const handleClearConversation = async (conversationId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Möchten Sie alle Nachrichten in dieser Konversation löschen?")) return;
+    const confirmed = await showConfirm({
+      title: "Nachrichten löschen",
+      description: "Möchten Sie alle Nachrichten in dieser Konversation löschen?",
+      variant: "warning",
+      confirmText: "Löschen",
+      cancelText: "Abbrechen",
+    });
+    if (!confirmed) return;
     
     try {
       await clearConversation(conversationId);
@@ -696,6 +713,7 @@ export default function ChatPage() {
           insights={insights}
           visible={insightPanelOpen}
         />
+        <AlertDialog {...alertDialogProps} />
       </div>
     </DashboardLayout>
   );

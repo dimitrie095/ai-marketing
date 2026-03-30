@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useAlertDialog } from "@/hooks/use-alert-dialog";
 import { AlertCircle, TrendingUp, TrendingDown, Filter, Calendar, Eye, CheckCircle, RefreshCw, Loader2, BarChart3, ChevronRight, XCircle, Info } from "lucide-react";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -47,6 +49,7 @@ export default function MonitoringPage() {
   const [stats, setStats] = useState<AlertStats | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const { alertDialogProps, showAlert } = useAlertDialog();
   
   // Filters
   const [severityFilter, setSeverityFilter] = useState<string>("all");
@@ -92,15 +95,27 @@ export default function MonitoringPage() {
         method: 'POST',
       });
       if (result.status === 'success') {
-        alert(`Erfolgreich ${result.generated || 0} Alerts generiert.`);
+        showAlert({
+          title: "Erfolg",
+          description: `Erfolgreich ${result.generated || 0} Alerts generiert.`,
+          variant: "success",
+        });
         loadAlerts();
         loadStats();
       } else {
-        alert('Fehler beim Generieren von Alerts: ' + result.message);
+        showAlert({
+          title: "Fehler",
+          description: 'Fehler beim Generieren von Alerts: ' + result.message,
+          variant: "error",
+        });
       }
     } catch (error) {
       console.error('Alert generation failed:', error);
-      alert('Fehler beim Generieren von Alerts. Bitte versuchen Sie es später erneut.');
+      showAlert({
+        title: "Fehler",
+        description: 'Fehler beim Generieren von Alerts. Bitte versuchen Sie es später erneut.',
+        variant: "error",
+      });
     } finally {
       setGenerating(false);
     }
@@ -502,6 +517,7 @@ export default function MonitoringPage() {
           )}
         </DialogContent>
       </Dialog>
+      <AlertDialog {...alertDialogProps} />
     </DashboardLayout>
   );
 }
