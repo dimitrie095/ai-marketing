@@ -3,7 +3,7 @@ FastAPI Application - Marketing Analytics AI
 Main entry point for the backend API
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging

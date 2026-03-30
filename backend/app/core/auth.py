@@ -90,12 +90,19 @@ async def get_current_user(
         )
     
     # Get user from database
-    user = await User.find_one({"username": username, "is_active": True})
-    if user is None:
+    try:
+        user = await User.find_one({"username": username, "is_active": True})
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Benutzer nicht gefunden oder deaktiviert",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except Exception as e:
+        logger.error(f"Database error during user lookup: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Benutzer nicht gefunden oder deaktiviert",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
         )
     
     return user

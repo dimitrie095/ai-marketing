@@ -45,6 +45,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { KPICard } from "@/components/dashboard/kpi-card";
+import { ExperimentsList } from "@/components/experiments/experiments-list";
 import { Campaign } from "@/types/campaign";
 import {
   ArrowLeft,
@@ -1430,6 +1431,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="adsets">AdSets ({adSets.length})</TabsTrigger>
             <TabsTrigger value="comparison">Vergleich</TabsTrigger>
+            <TabsTrigger value="insights">Insights</TabsTrigger>
             <TabsTrigger value="chat">KI-Chat</TabsTrigger>
             <TabsTrigger value="settings">Einstellungen</TabsTrigger>
           </TabsList>
@@ -2015,6 +2017,24 @@ export default function CampaignDetailPage() {
               </CardContent>
             </Card>
 
+          </TabsContent>
+
+          {/* Insights Tab */}
+          <TabsContent value="insights" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5" />
+                  Experimente & Insights
+                </CardTitle>
+                <CardDescription>
+                  A/B Tests und automatische Hypothesen für diese Kampagne
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ExperimentsList campaignId={campaignId} />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Chat Tab */}

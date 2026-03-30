@@ -93,4 +93,13 @@ try:
 except ImportError:
     pass
 
+try:
+    from .experiments import router as experiments_router
+    api_router.include_router(experiments_router, tags=["Experiments"])
+    print("✅ Experiments router registered successfully")  # reload trigger
+except Exception as e:
+    print(f"❌ Experiments router not available: {e}")
+    import traceback
+    traceback.print_exc()
+
 __all__ = ["api_router"]

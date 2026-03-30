@@ -6,6 +6,7 @@ MongoDB Document models for collections
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
+import uuid
 from beanie import Document, Link, Indexed
 from pydantic import Field, BaseModel, field_validator
 from bson import Decimal128
@@ -352,6 +353,67 @@ class Alert(Document):
             [("is_read", 1)],
             [("created_at", -1)],
             [("alert_type", 1)],
+        ]
+
+
+class Experiment(Document):
+    """A/B Testing Experiment for a campaign"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    campaign_id: str
+    name: str
+    type: str  # creative, audience, budget
+    status: str = Field(default="running")  # running, completed
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "experiments"
+        indexes = [
+            [("campaign_id", 1)],
+            [("status", 1)],
+            [("created_at", -1)],
+        ]
+
+
+class ExperimentVariant(Document):
+    """Variant within an experiment (A/B)"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    experiment_id: str
+    name: str  # A, B, C...
+    config: Dict[str, Any] = Field(default_factory=dict)  # ad_id, budget, audience etc.
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "experiment_variants"
+        indexes = [
+            [("experiment_id", 1)],
+        ]
+
+
+class ExperimentResult(Document):
+    """Aggregated results for a variant over a time period"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    variant_id: str
+    start_date: date
+    end_date: date
+    impressions: int = Field(default=0)
+    clicks: int = Field(default=0)
+    conversions: int = Field(default=0)
+    revenue: Decimal = Field(default=Decimal("0"))
+    spend: Decimal = Field(default=Decimal("0"))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @field_validator("revenue", "spend", mode="before")
+    @classmethod
+    def coerce_decimal128(cls, v: Any) -> Any:
+        return decimal128_to_decimal(v)
+
+    class Settings:
+        name = "experiment_results"
+        indexes = [
+            [("variant_id", 1)],
+            [("start_date", -1)],
         ]
 
 

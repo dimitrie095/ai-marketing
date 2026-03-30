@@ -21,7 +21,10 @@ try:
         ProcessedData,
         RawData,
         MetaInsights,
-        GoogleAdsReport
+        GoogleAdsReport,
+        Experiment,
+        ExperimentVariant,
+        ExperimentResult
     )
     from .models_llm import (
         LLMProvider,
@@ -75,6 +78,9 @@ __all__ = [
     "RawData",
     "MetaInsights",
     "GoogleAdsReport",
+    "Experiment",
+    "ExperimentVariant",
+    "ExperimentResult",
     
     # LLM models
     "LLMProvider",

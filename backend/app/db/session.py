@@ -34,7 +34,7 @@ async def init_beanie_if_needed():
     
     try:
         from beanie import init_beanie
-        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport, User, AnalysisResult, AudienceDemographic, Alert
+        from .models import Campaign, AdSet, Ad, Metric, ProcessedData, RawData, MetaInsights, GoogleAdsReport, User, AnalysisResult, AudienceDemographic, Alert, Experiment, ExperimentVariant, ExperimentResult
         from .models_llm import LLMProvider, LLMConfig, Conversation, Message, SyncJob, PromptTemplate
         from .models_ads_config import AdPlatformConfig
         
@@ -60,6 +60,9 @@ async def init_beanie_if_needed():
                 AnalysisResult,
                 AudienceDemographic,
                 Alert,
+                Experiment,
+                ExperimentVariant,
+                ExperimentResult,
                 AdPlatformConfig
             ]
         )

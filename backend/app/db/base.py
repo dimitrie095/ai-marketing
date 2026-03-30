@@ -12,7 +12,10 @@ from .models import (
     MetaInsights,
     GoogleAdsReport,
     CreativeSpec,
-    ActionValues
+    ActionValues,
+    Experiment,
+    ExperimentVariant,
+    ExperimentResult
 )
 
 # Re-export all document models
@@ -26,5 +29,8 @@ __all__ = [
     "MetaInsights",
     "GoogleAdsReport",
     "CreativeSpec",
-    "ActionValues"
+    "ActionValues",
+    "Experiment",
+    "ExperimentVariant",
+    "ExperimentResult"
 ]
