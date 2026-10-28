@@ -1,0 +1,161 @@
+# Automatisch von Hakivia gebaut
+# Regeln: 2026-10-28
+# Datei: .github/workflows/hakivia-ci.yml
+# Aus der Repo-Analyse: je Komponente ein Job mit den Befehlen, die das Repository selbst mitbringt.
+# Secrets: HAKIVIA_API_BASE_URL (alt: REGUSHIELD_API_BASE_URL), PROJECT_POLICY_CHECK_TOKEN, PROJECT_KEY
+
+name: Hakivia CI
+
+on:
+  push:
+    branches: ["master", "release/**"]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: "Ausgelöst von (Hakivia)"
+        required: false
+
+env:
+  HAKIVIA_API_BASE_URL: ${{ secrets.HAKIVIA_API_BASE_URL || secrets.REGUSHIELD_API_BASE_URL }}
+  PROJECT_POLICY_CHECK_TOKEN: ${{ secrets.PROJECT_POLICY_CHECK_TOKEN }}
+  PROJECT_KEY: ${{ secrets.PROJECT_KEY }}
+
+jobs:
+  # backend: requirements.txt vorhanden → pip; keine Python-Version angegeben → Python 3.12
+  test-backend:
+    name: Tests & Build (backend)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+      # Testdateien (tests/ bzw. test_*.py) gefunden → pytest
+      - name: test
+        run: pip install pytest && python -m pytest -q
+
+  # frontend: package-lock.json vorhanden → npm ci; keine Node-Version angegeben → Node 20 (LTS)
+  test-frontend:
+    name: Tests & Build (frontend)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Abhängigkeiten installieren
+        run: npm ci
+      # Skript „lint“ in package.json
+      - name: lint
+        run: npm run lint
+      # Skript „build“ in package.json
+      - name: build
+        run: npm run build
+
+  build:
+    name: Hakivia
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SBOM generieren (syft, alle Sprachen im Repository)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.json
+          upload-artifact: false
+
+      - name: SBOM für OSV bereitstellen
+        run: cp sbom.json sbom.cdx.json
+      - name: OSV-Scanner (Abhängigkeiten aus der SBOM)
+        uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --format
+            json
+            --output-file
+            osv.json
+            -L
+            sbom.cdx.json
+
+      - name: Gitleaks (Secrets in der Git-Historie)
+        continue-on-error: true
+        run: |
+          V=8.24.3
+          BASE=https://github.com/gitleaks/gitleaks/releases/download/v$V
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" "$BASE/gitleaks_${V}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.sha" "$BASE/gitleaks_${V}_checksums.txt"
+          SUM=$(grep " gitleaks_${V}_linux_x64.tar.gz$" "$RUNNER_TEMP/gitleaks.sha" | cut -d" " -f1)
+          [ -n "$SUM" ] && echo "$SUM  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" detect --source . --redact --no-banner \
+            --report-format json --report-path gitleaks.json --exit-code 0
+
+      - name: Ergebnisse an Hakivia übertragen
+        run: |
+          if [ -z "$HAKIVIA_API_BASE_URL" ] || [ -z "$PROJECT_POLICY_CHECK_TOKEN" ] || [ -z "$PROJECT_KEY" ]; then
+            echo "::warning::Hakivia-Secrets nicht gesetzt — nichts übertragen."
+            exit 0
+          fi
+          send() {  # Endpunkt, Datei, Werkzeug (leer bei der SBOM)
+            if [ ! -s "$2" ]; then echo "::warning::$2 fehlt — nicht übertragen."; return 0; fi
+            jq -n --arg p "$PROJECT_KEY" --arg sha "$GITHUB_SHA" --arg ref "$GITHUB_REF_NAME" \
+              --arg repo "$GITHUB_REPOSITORY" --arg tool "$3" --slurpfile doc "$2" \
+              '{project_id: $p, commit_sha: $sha, ref: $ref, repository: $repo, document: $doc[0]}
+               + (if $tool == "" then {} else {tool: $tool} end)' > hakivia-upload.json
+            curl -fsS -X POST "$HAKIVIA_API_BASE_URL$1" \
+              -H "X-Hakivia-Policy-Token: $PROJECT_POLICY_CHECK_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @hakivia-upload.json
+          }
+          send /api/v1/supply-chain/sbom sbom.json ""
+          send /api/v1/supply-chain/dependency-scan osv.json osv
+          send /api/v1/supply-chain/secret-scan gitleaks.json gitleaks
+
+      - name: Sperre bei Schwachstellen HIGH/CRITICAL
+        env:
+          HAKIVIA_OSV_GATE: ${{ vars.HAKIVIA_OSV_GATE || vars.REGUSHIELD_OSV_GATE || 'block' }}
+        run: |
+          if [ ! -s osv.json ]; then echo "::warning::osv.json fehlt — Sperre übersprungen."; exit 0; fi
+          HIGH=$(jq 'def score($g; $id): ([$g[]? | select(any((.ids // [])[]; . == $id)) | ((.max_severity // "0") | tonumber? // 0)] | max) // 0; [.results[]?.packages[]? | (.groups // []) as $g | .vulnerabilities[]? | select(((.database_specific.severity // "") | ascii_upcase | IN("HIGH", "CRITICAL")) or (score($g; .id) >= 7)) | .id] | unique | length' osv.json)
+          if [ "$HIGH" -gt 0 ]; then
+            if [ "$HAKIVIA_OSV_GATE" = "warn" ]; then
+              echo "::warning::OSV: $HIGH Schwachstelle(n) HIGH/CRITICAL"
+            else
+              echo "::error::OSV: $HIGH Schwachstelle(n) HIGH/CRITICAL — Details in Hakivia unter SBOM → Schwachstellen"
+              exit 1
+            fi
+          fi
+
+      - name: Sperre bei gefundenen Secrets
+        run: |
+          if [ ! -s gitleaks.json ]; then echo "::warning::gitleaks.json fehlt — Sperre übersprungen."; exit 0; fi
+          N=$(jq 'if type == "array" then length else ((.findings // .results // []) | length) end' gitleaks.json)
+          if [ "$N" -gt 0 ]; then
+            jq -r '.[]? | "::error file=\(.File),line=\(.StartLine)::Secret (\(.RuleID)) in \(.File)"' gitleaks.json
+            echo "::error::Gitleaks: $N Secret(s) im Repository — Schlüssel beim Anbieter sperren, Datei entfernen, Historie bereinigen"
+            exit 1
+          fi
